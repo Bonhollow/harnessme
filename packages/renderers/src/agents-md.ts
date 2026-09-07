@@ -31,7 +31,10 @@ export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {
   const evidence = new Map(facts.evidence.map((item) => [item.id, item]));
   const conventions = facts.conventions.facts.length
     ? facts.conventions.facts
-        .map((fact) => `- ${fact.statement} Evidence: ${citation(evidence, fact.evidence)}.`)
+        .map((fact) => {
+          const assisted = fact.evidence.some((id) => evidence.get(id)?.kind === "ai");
+          return `- [${assisted ? "AI-assisted, locally verified" : "Observed"}] ${fact.statement} Evidence: ${citation(evidence, fact.evidence)}.`;
+        })
         .join("\n")
     : "- No stable conventions were inferred yet; follow checked-in formatter and linter configuration.";
   const languages = facts.stack.languages.map((item) => `${item.name} (${item.percentage}%)`).join(", ") || "None detected";
@@ -41,11 +44,16 @@ export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {
     ? directiveBody
     : "No maintainer-authored directives have been recorded.";
   const pendingBody = pending ? `${pending}\n` : "";
-  const critical = facts.criticalPaths.paths.length
-    ? facts.criticalPaths.paths.map((entry) => `- \`${entry.glob}\`: ${entry.reason} Approvers: ${entry.approvers.map((item) => `@${item}`).join(", ")} (${entry.source}).`).join("\n")
+  const activeCritical = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
+  const proposedCritical = facts.criticalPaths.paths.filter((entry) => entry.status === "proposed");
+  const critical = activeCritical.length
+    ? activeCritical.map((entry) => `- \`${entry.glob}\`: ${entry.reason} Approvers: ${entry.approvers.map((item) => `@${item}`).join(", ")} (${entry.source}, active).`).join("\n")
     : "- No critical paths are currently registered.";
+  const proposals = proposedCritical.length
+    ? proposedCritical.map((entry) => `- \`${entry.glob}\`: ${entry.reason} (suggested only; no gate applies).`).join("\n")
+    : "- No critical-path candidates are awaiting maintainer review.";
   const changes = facts.changes.changes.length
     ? facts.changes.changes.map((change) => `- ${change.date}: ${change.summary} (${change.paths.map((path) => `\`${path}\``).join(", ")}).`).join("\n")
     : "- No verified material changes recorded yet.";
-  return `${GENERATED_MARKER}\n# Repository instructions\n\nHarnessME derived the observed sections below from repository evidence. Keep observed facts distinct from maintainer-authored directives.\n\n## Stack\n\n- Languages: ${languages}\n- Frameworks: ${frameworks}\n- Package managers: ${facts.stack.packageManagers.join(", ") || "None detected"}\n\n## Observed conventions\n\n${conventions}\n\n## Observed architecture\n\n${architectureBody(facts.architecture)}\n\n## Critical-path safety gate\n\nBefore editing a path matching any rule below, stop and ask the developer for explicit confirmation. A draft record is not confirmation. Never approve your own change or bypass the gate. After confirmation, create a draft with \`harnessme critical draft\`; an allowed reviewer must approve the exact staged content, and the approved record plus \`.harnessme/CRITICAL.md\` must ship with the change.\n\n${critical}\n\n## Verified material changes\n\n${changes}\n\n## Project directives\n\n${directives}\n\n## Keeping this harness current\n\nAfter shipping or materially changing behavior, add one dated bullet to the pending section. No command is needed during the coding session. A later \`harnessme validate\` verifies the claim against repository evidence.\n\n${PENDING_START}\n### Pending updates (edit directly — no command needed)\nShipped or materially changed a feature? Add one dated bullet below.\n\n${pendingBody}${PENDING_END}\n`;
+  return `${GENERATED_MARKER}\n# Repository instructions\n\nHarnessME derived the observed sections below from repository evidence. Keep observed facts distinct from maintainer-authored directives.\n\n## Stack\n\n- Languages: ${languages}\n- Frameworks: ${frameworks}\n- Package managers: ${facts.stack.packageManagers.join(", ") || "None detected"}\n\n## Observed conventions\n\n${conventions}\n\n## Observed architecture\n\n${architectureBody(facts.architecture)}\n\n## Critical-path safety gate\n\nBefore editing a path matching any active rule below, stop and ask the developer for explicit confirmation. A draft record is not confirmation. Never approve your own change or bypass the gate. After confirmation, create a draft with \`harnessme critical draft\`; an allowed reviewer must approve the exact staged content, and the approved record plus \`.harnessme/CRITICAL.md\` must ship with the change.\n\n${critical}\n\n## Proposed critical paths\n\nThese heuristic candidates are informational until a maintainer activates them with \`harnessme critical activate <glob>\`.\n\n${proposals}\n\n## Verified material changes\n\n${changes}\n\n## Project directives\n\n${directives}\n\n## Keeping this harness current\n\nAfter shipping or materially changing behavior, add one dated bullet to the pending section. No command is needed during the coding session. A later \`harnessme validate\` verifies the claim against repository evidence.\n\n${PENDING_START}\n### Pending updates (edit directly — no command needed)\nShipped or materially changed a feature? Add one dated bullet below.\n\n${pendingBody}${PENDING_END}\n`;
 }

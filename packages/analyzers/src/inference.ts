@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AiFallbackConfig } from "@harnessme/core";
+import type { AiReviewConfig } from "@harnessme/core";
 
 export interface InferenceRuntime {
   name: string;
   generate(schemaName: string, schema: object, system: string, input: string): Promise<unknown>;
 }
+
+export class InferenceUnavailableError extends Error {}
 
 interface ProcessResult { code: number | null; stdout: string; stderr: string }
 
@@ -47,7 +49,7 @@ function prompt(system: string, input: string): string {
   return `SYSTEM INSTRUCTIONS\n${system}\n\nINPUT DATA\n${input}`;
 }
 
-function codexRuntime(config: AiFallbackConfig): InferenceRuntime {
+function codexRuntime(config: AiReviewConfig): InferenceRuntime {
   return {
     name: "codex",
     async generate(schemaName, schema, system, input) {
@@ -69,7 +71,7 @@ function codexRuntime(config: AiFallbackConfig): InferenceRuntime {
   };
 }
 
-function claudeRuntime(config: AiFallbackConfig): InferenceRuntime {
+function claudeRuntime(config: AiReviewConfig): InferenceRuntime {
   return {
     name: "claude-code",
     async generate(_schemaName, schema, system, input) {
@@ -88,7 +90,7 @@ function claudeRuntime(config: AiFallbackConfig): InferenceRuntime {
   };
 }
 
-function cursorRuntime(config: AiFallbackConfig, command = "cursor-agent"): InferenceRuntime {
+function cursorRuntime(config: AiReviewConfig, command = "cursor-agent"): InferenceRuntime {
   return {
     name: "cursor",
     async generate(_schemaName, schema, system, input) {
@@ -109,7 +111,7 @@ function cursorRuntime(config: AiFallbackConfig, command = "cursor-agent"): Infe
   };
 }
 
-function httpRuntime(config: AiFallbackConfig): InferenceRuntime {
+function httpRuntime(config: AiReviewConfig): InferenceRuntime {
   if (!config.endpoint || !config.model) throw new Error("HTTP inference requires an endpoint and model.");
   return {
     name: "http",
@@ -131,7 +133,7 @@ function httpRuntime(config: AiFallbackConfig): InferenceRuntime {
   };
 }
 
-export async function createInferenceRuntime(config: AiFallbackConfig): Promise<InferenceRuntime> {
+export async function createInferenceRuntime(config: AiReviewConfig): Promise<InferenceRuntime> {
   if (config.provider === "http" || (config.provider === "auto" && !config.frameworks.length && config.endpoint)) return httpRuntime(config);
   const requested = config.provider === "auto" ? config.frameworks : [config.provider];
   for (const provider of requested) {
@@ -142,5 +144,5 @@ export async function createInferenceRuntime(config: AiFallbackConfig): Promise<
       if (await available("agent")) return cursorRuntime(config, "agent");
     }
   }
-  throw new Error(`No authenticated inference CLI is available for: ${requested.join(", ") || "the selected providers"}. Install/login to one or use --inference-provider=http.`);
+  throw new InferenceUnavailableError(`No authenticated inference CLI is available for: ${requested.join(", ") || "the selected providers"}. Install/login to one or use --provider=http.`);
 }

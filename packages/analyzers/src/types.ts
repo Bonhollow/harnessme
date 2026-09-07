@@ -1,4 +1,4 @@
-import type { AiFallbackConfig, Conventions, Evidence, Stack } from "@harnessme/core";
+import type { AiFallbackConfig, AiReviewConfig, Conventions, Evidence, Stack } from "@harnessme/core";
 
 export interface AnalysisResult {
   conventions: Conventions;
@@ -7,6 +7,7 @@ export interface AnalysisResult {
   architecture: string;
   hotspots: Array<{ path: string; changes: number; fanIn: number; score: number }>;
   warnings: string[];
+  aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
 }
 
 export interface AnalyzeOptions {
@@ -14,4 +15,5 @@ export interface AnalyzeOptions {
   exclude: string[];
   maxFileBytes: number;
   aiFallback?: AiFallbackConfig;
+  review?: AiReviewConfig;
 }

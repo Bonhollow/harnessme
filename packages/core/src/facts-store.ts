@@ -32,7 +32,9 @@ export const harnessDir = (root: string): string => join(root, ".harnessme");
 
 export async function writeFacts(
   root: string,
-  data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture">,
+  data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture"> & {
+    aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
+  },
 ): Promise<void> {
   const facts = join(harnessDir(root), "facts");
   ConventionsSchema.parse(data.conventions);
@@ -43,6 +45,10 @@ export async function writeFacts(
     writeYaml(join(facts, "stack.yaml"), data.stack),
     writeJson(join(facts, "evidence.json"), data.evidence),
     atomicWrite(join(facts, "architecture.md"), data.architecture),
+    ...(data.aiInputs ? [writeJson(join(facts, "ai-inputs.json"), {
+      generatedAt: new Date().toISOString(),
+      files: data.aiInputs,
+    })] : []),
   ]);
 }
 

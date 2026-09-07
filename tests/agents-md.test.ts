@@ -37,6 +37,6 @@ describe("AGENTS.md renderer", () => {
     expect(output).toContain("Never commit credentials.");
     expect(output).toContain("HARNESSME:PENDING:START");
     expect(output).toContain("changed `src/a.ts`");
-    expect(output).toContain("Before editing a path matching any rule below, stop and ask the developer");
+    expect(output).toContain("Before editing a path matching any active rule below, stop and ask the developer");
   });
 });

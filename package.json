@@ -1,7 +1,15 @@
 {
   "name": "harnessme",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Derive, distribute, and govern AI coding-agent instructions from the codebase itself.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bonhollow/harnessme.git"
+  },
+  "homepage": "https://github.com/Bonhollow/harnessme#readme",
+  "bugs": {
+    "url": "https://github.com/Bonhollow/harnessme/issues"
+  },
   "type": "module",
   "bin": {
     "harnessme": "dist/cli.js"
@@ -9,6 +17,7 @@
   "files": [
     "dist",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
@@ -17,6 +26,7 @@
     "lint": "tsc --noEmit",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
+    "test:package": "node scripts/package-smoke.mjs",
     "prepack": "npm run build"
   },
   "engines": {
@@ -28,9 +38,15 @@
     "codex",
     "claude-code",
     "cursor",
+    "prompt-engineering",
+    "ai-governance",
     "developer-tools"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "@intellectronica/ruler": "0.3.44",
@@ -38,6 +54,7 @@
     "citty": "0.2.2",
     "fast-glob": "3.3.3",
     "gray-matter": "4.0.3",
+    "ignore": "7.0.5",
     "js-yaml": "4.3.2",
     "lefthook": "2.1.12",
     "minimatch": "10.2.6",

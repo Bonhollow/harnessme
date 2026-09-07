@@ -6,3 +6,4 @@ export * from "./pending.js";
 export * from "./governance.js";
 export * from "./git.js";
 export * from "./governance-artifacts.js";
+export * from "./version.js";

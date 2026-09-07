@@ -33,7 +33,7 @@ export async function applyRuler(root: string, selected: Provider[]): Promise<vo
     false, // dryRun
     false, // localOnly
     false, // nested
-    true, // backup existing provider files
+    false, // HarnessME already protects unmanaged files and writes atomically
     false, // skills
     false, // local .gitignore
     false, // subagents

@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { exists } from "@harnessme/core";
-import { info } from "../output.js";
+import { createProgress, info } from "../output.js";
 import { projectRoot } from "../project.js";
 
 const require = createRequire(import.meta.url);
@@ -25,7 +25,10 @@ const install = defineCommand({
     const root = projectRoot(args.root);
     if (!await exists(join(root, ".git"))) throw new Error("Git hooks require a Git repository.");
     if (!await exists(join(root, "lefthook.yml"))) throw new Error("Run `harnessme init` or `harnessme sync` first.");
+    const progress = createProgress(2);
+    progress.step("Installing the local pre-commit safety gate");
     await installLefthook(root);
+    progress.done("Git safety gate installed");
     if (!await exists(join(root, ".git", "hooks", "pre-commit"))) throw new Error("Lefthook finished without creating .git/hooks/pre-commit.");
     info("Installed the HarnessME pre-commit critical-path gate.");
   },

@@ -13,15 +13,16 @@ import {
   writeVerifiedChanges,
   writeYaml,
 } from "@harnessme/core";
-import { analyzeProject } from "@harnessme/analyzers";
+import { analyzeProject, previewAiInputs } from "@harnessme/analyzers";
 import { GENERATED_MARKER, providers, resolveProviders, syncHarness } from "@harnessme/renderers";
-import { info, warn } from "../output.js";
+import { createProgress, info, warn } from "../output.js";
 import { projectRoot, providerValues } from "../project.js";
 
 export default defineCommand({
   meta: { name: "init", description: "Analyze a repository and create its governed agent harness" },
   args: {
     provider: { type: "string", description: "Inference provider: auto, codex, claude-code, cursor, or http", default: "auto" },
+    "review-provider": { type: "string", description: "Optional independent fact reviewer: auto, codex, claude-code, cursor, or http" },
     targets: { type: "string", description: "Comma-separated output targets; defaults to every supported framework" },
     "extra-prompt": { type: "string", description: "Maintainer-authored project directive" },
     "critical-approvers": { type: "string", description: "Comma-separated handles for automatically detected critical paths", default: "developer" },
@@ -29,6 +30,12 @@ export default defineCommand({
     "ai-endpoint": { type: "string", description: "Chat-completions endpoint when --provider=http" },
     model: { type: "string", description: "Optional inference model override; otherwise use the framework default" },
     "ai-api-key-env": { type: "string", description: "Environment variable containing the optional endpoint API key", default: "" },
+    "ai-include": { type: "string", description: "Comma-separated source globs allowed for model inference", default: "**/*" },
+    "ai-exclude": { type: "string", description: "Comma-separated source globs excluded from model inference" },
+    "ai-preview": { type: "boolean", description: "List files selected for model inference, then exit without writing" },
+    "review-ai-endpoint": { type: "string", description: "Chat-completions endpoint when --review-provider=http" },
+    "review-model": { type: "string", description: "Optional independent reviewer model override" },
+    "review-ai-api-key-env": { type: "string", description: "Environment variable containing the optional reviewer endpoint API key", default: "" },
     root: { type: "string", description: "Repository root", valueHint: "path" },
   },
   async run({ args }) {
@@ -60,16 +67,57 @@ export default defineCommand({
         apiKeyEnv: String(args.aiApiKeyEnv),
         maxFiles: 20,
         maxFileBytes: 65_536,
+        include: String(args.aiInclude).split(",").map((item) => item.trim()).filter(Boolean),
+        exclude: typeof args.aiExclude === "string" ? args.aiExclude.split(",").map((item) => item.trim()).filter(Boolean) : [],
       };
+      if (typeof args.reviewProvider === "string") {
+        const rawReviewProvider = args.reviewProvider;
+        const reviewProvider = rawReviewProvider === "claude" ? "claude-code" : rawReviewProvider;
+        if (!["auto", "codex", "claude-code", "cursor", "http"].includes(reviewProvider)) {
+          throw new Error("--review-provider must be auto, codex, claude-code, cursor, or http.");
+        }
+        const reviewModel = typeof args.reviewModel === "string" ? args.reviewModel : undefined;
+        if (reviewProvider === "http" && (!args.reviewAiEndpoint || !reviewModel)) {
+          throw new Error("HTTP review inference requires --review-ai-endpoint and --review-model.");
+        }
+        config.analysis.review = {
+          provider: reviewProvider as "auto" | "codex" | "claude-code" | "cursor" | "http",
+          frameworks: reviewProvider === "auto"
+            ? ["codex", "claude-code", "cursor"]
+            : [reviewProvider].filter((id): id is "codex" | "claude-code" | "cursor" => ["codex", "claude-code", "cursor"].includes(id)),
+          endpoint: typeof args.reviewAiEndpoint === "string" ? args.reviewAiEndpoint : undefined,
+          model: reviewModel,
+          apiKeyEnv: String(args.reviewAiApiKeyEnv),
+        };
+      }
     }
+    if (args.aiPreview) {
+      if (!config.analysis.aiFallback) throw new Error("--ai-preview requires model inference; remove --deterministic.");
+      const previewProgress = createProgress(2);
+      previewProgress.step("Inspecting model-inference file selection");
+      const preview = await previewAiInputs(root, config.analysis.exclude, config.analysis.aiFallback);
+      previewProgress.done("AI input preview complete");
+      info(`Model inference would receive ${preview.length} file(s):`);
+      for (const item of preview) info(`- ${item.path} (${item.bytes} bytes, ${item.redactedLines} redacted line(s))`);
+      return;
+    }
+    const progress = createProgress(6);
+    progress.step("Preparing the HarnessME workspace");
     await mkdir(join(base, "facts"), { recursive: true });
     await mkdir(join(base, "critical-log"), { recursive: true });
     await mkdir(join(base, "skills"), { recursive: true });
+    if (!await exists(join(root, ".harnessmeignore"))) {
+      await atomicWrite(
+        join(root, ".harnessmeignore"),
+        "# Additional paths that HarnessME must never send to model inference.\n# Built-in exclusions already cover common keys, credentials, .env files, and secret directories.\n",
+      );
+    }
     await writeYaml(join(base, "harnessme.yaml"), config);
     const criticalPaths = defaultCriticalPaths();
     await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     await writeVerifiedChanges(root, defaultVerifiedChanges());
 
+    progress.step("Preserving existing repository instructions");
     let directives = "# Project directives\n\n";
     const agentsPath = join(root, "AGENTS.md");
     if (await exists(agentsPath)) {
@@ -100,8 +148,9 @@ export default defineCommand({
       "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`.\n\n| Date | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|\n",
     );
 
-    info(`Analyzing ${root}...`);
+    progress.step("Analyzing source, configuration, dependencies, and history");
     const analysis = await analyzeProject({ root, ...config.analysis });
+    progress.step("Saving evidence and critical-path candidates");
     await writeFacts(root, analysis);
     const approvers = String(args.criticalApprovers).split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
     if (!approvers.length) throw new Error("--critical-approvers must include at least one handle.");
@@ -116,16 +165,19 @@ export default defineCommand({
           reason: `Automatically detected core/hotspot (${candidate.changes} changes, ${candidate.fanIn} inbound imports, score ${candidate.score}).`,
           approvers,
           source: "heuristic",
+          status: "proposed",
         });
       }
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     }
     config.languages = analysis.stack.languages.map((language) => language.name);
     await writeYaml(join(base, "harnessme.yaml"), config);
+    progress.step("Generating instructions and governance integrations");
     const result = await syncHarness(root);
+    progress.done("Harness created");
     for (const message of analysis.warnings) warn(message);
     info(`Initialized HarnessME with targets: ${result.targets.join(", ")}.`);
-    info(`Detected ${criticalPaths.paths.length} critical path candidate(s). Review .harnessme/critical-paths.yaml, then run \`harnessme hooks install\`.`);
+    info(`Detected ${criticalPaths.paths.length} proposed critical path candidate(s). Review and activate them with \`harnessme critical activate <glob>\`, then run \`harnessme hooks install\`.`);
     info(`Generated ${result.files.join(", ")}.`);
   },
 });

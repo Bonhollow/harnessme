@@ -18,7 +18,7 @@ import {
   extractPending,
   syncHarness,
 } from "@harnessme/renderers";
-import { info } from "../output.js";
+import { createProgress, info } from "../output.js";
 import { projectRoot } from "../project.js";
 
 function replacePending(content: string, lines: string[]): string {
@@ -38,12 +38,15 @@ export default defineCommand({
   },
   async run({ args }) {
     const root = projectRoot(args.root);
+    const progress = createProgress(5);
+    progress.step("Reading pending harness updates");
     const maxRetries = Number.parseInt(String(args.maxRetries), 10);
     if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new Error("--max-retries must be a non-negative integer.");
     const agentsPath = join(root, "AGENTS.md");
     const agents = await readText(agentsPath);
     const pending = extractPending(agents);
     const lines = pending.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    progress.step("Verifying pending claims against repository evidence");
     const results = await Promise.all(lines.map((line) => validatePendingLine(root, line, maxRetries)));
     const unresolved = results
       .filter((result) => result.status !== "verified")
@@ -54,6 +57,7 @@ export default defineCommand({
     if (lines.length) await atomicWrite(agentsPath, replacePending(agents, unresolved));
 
     if (verified.length) {
+      progress.step("Refreshing evidence-backed repository facts");
       const facts = await readFacts(root);
       const analysis = await analyzeProject({ root, ...facts.config.analysis });
       const retainedEvidence = new Set(facts.changes.changes.flatMap((change) => change.evidence));
@@ -91,11 +95,16 @@ export default defineCommand({
       await writeFacts(root, analysis);
       await writeVerifiedChanges(root, facts.changes);
       info(`Verified ${verified.length} pending update(s) and refreshed evidence-backed facts.`);
+    } else {
+      progress.step("No verified fact refresh required");
     }
+    progress.step("Checking critical-path review records");
     const records = await readCriticalRecords(root);
     const drafts = records.filter((record) => record.status === "draft");
     if (records.length) info(`Validated ${records.length} critical change record(s).`);
+    progress.step("Regenerating agent integrations");
     await syncHarness(root);
+    progress.done("Validation complete");
     if (unresolved.length) {
       info(`${unresolved.length} pending update(s) still need review.`);
       if (args.ci) process.exitCode = 1;

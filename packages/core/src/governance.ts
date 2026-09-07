@@ -62,7 +62,7 @@ export async function readCriticalPaths(root: string): Promise<CriticalPaths> {
 
 export function matchingCriticalPath(config: CriticalPaths, path: string) {
   const normalized = posixPath(path).replace(/^\.\//u, "");
-  return config.paths.find((entry) => minimatch(normalized, entry.glob, { dot: true, matchBase: false }));
+  return config.paths.find((entry) => entry.status === "active" && minimatch(normalized, entry.glob, { dot: true, matchBase: false }));
 }
 
 export function findCriticalMatches(config: CriticalPaths, paths: string[]): CriticalMatch[] {

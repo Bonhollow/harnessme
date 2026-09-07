@@ -10,11 +10,12 @@ import critical from "./commands/critical.js";
 import criticalGate from "./commands/critical-gate.js";
 import hooks from "./commands/hooks.js";
 import targets from "./commands/targets.js";
+import { HARNESSME_VERSION } from "@harnessme/core";
 
 const main = defineCommand({
   meta: {
     name: "harnessme",
-    version: "0.1.0",
+    version: HARNESSME_VERSION,
     description: "Derive and govern AI coding-agent instructions from repository evidence.",
   },
   subCommands: {

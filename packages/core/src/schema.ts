@@ -5,7 +5,7 @@ export const EvidenceSchema = z.object({
   path: z.string().min(1),
   line: z.number().int().positive(),
   endLine: z.number().int().positive().optional(),
-  kind: z.enum(["config", "ast", "dependency", "structure", "git"]),
+  kind: z.enum(["config", "ast", "dependency", "structure", "git", "ai"]),
   excerpt: z.string().min(1),
 });
 
@@ -54,6 +54,14 @@ export const StackSchema = z.object({
   topLevelModules: z.array(z.string()),
 });
 
+const InferenceConfigSchema = z.object({
+  provider: z.enum(["auto", "codex", "claude-code", "cursor", "http"]).default("auto"),
+  frameworks: z.array(z.enum(["codex", "claude-code", "cursor"])).default([]),
+  endpoint: z.string().url().optional(),
+  model: z.string().min(1).optional(),
+  apiKeyEnv: z.string().default(""),
+});
+
 const HarnessConfigObjectSchema = z.object({
   schemaVersion: z.literal(1),
   targets: z.array(z.string().min(1)).min(1),
@@ -61,16 +69,14 @@ const HarnessConfigObjectSchema = z.object({
   analysis: z.object({
     exclude: z.array(z.string()),
     maxFileBytes: z.number().int().positive().default(524_288),
-    aiFallback: z.object({
+    aiFallback: InferenceConfigSchema.extend({
       enabled: z.boolean(),
-      provider: z.enum(["auto", "codex", "claude-code", "cursor", "http"]).default("auto"),
-      frameworks: z.array(z.enum(["codex", "claude-code", "cursor"])).default([]),
-      endpoint: z.string().url().optional(),
-      model: z.string().min(1).optional(),
-      apiKeyEnv: z.string().default(""),
       maxFiles: z.number().int().positive().max(100).default(20),
       maxFileBytes: z.number().int().positive().max(262_144).default(65_536),
+      include: z.array(z.string().min(1)).default(["**/*"]),
+      exclude: z.array(z.string().min(1)).default([]),
     }).optional(),
+    review: InferenceConfigSchema.optional(),
   }),
   distribution: z.object({
     backend: z.enum(["ruler", "native"]).default("ruler"),
@@ -88,6 +94,7 @@ export const CriticalPathSchema = z.object({
   reason: z.string().min(1),
   approvers: z.array(z.string().min(1)).min(1),
   source: z.enum(["explicit", "heuristic"]).default("explicit"),
+  status: z.enum(["proposed", "active"]).default("active"),
 });
 
 export const CriticalPathsSchema = z.object({
@@ -120,6 +127,7 @@ export type Conventions = z.infer<typeof ConventionsSchema>;
 export type Stack = z.infer<typeof StackSchema>;
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 export type AiFallbackConfig = NonNullable<HarnessConfig["analysis"]["aiFallback"]>;
+export type AiReviewConfig = NonNullable<HarnessConfig["analysis"]["review"]>;
 export type CriticalPaths = z.infer<typeof CriticalPathsSchema>;
 export type VerifiedChange = z.infer<typeof VerifiedChangeSchema>;
 export type VerifiedChanges = z.infer<typeof VerifiedChangesSchema>;

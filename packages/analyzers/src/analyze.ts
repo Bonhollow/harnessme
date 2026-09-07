@@ -14,6 +14,7 @@ import { analyzeConfigs } from "./configs.js";
 import { addConvention, addEvidence, readable } from "./evidence.js";
 import { packageFacts } from "./packages.js";
 import { analyzeWithAiFallback } from "./ai-fallback.js";
+import { InferenceUnavailableError } from "./inference.js";
 
 const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,ini,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
 const languageByExtension: Record<string, string> = {
@@ -130,6 +131,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   let firstResultEvidence: string | undefined;
   const importsByFile = new Map<string, string[]>();
   let inferredArchitecture: Array<{ statement: string; path: string; line: number }> = [];
+  let aiInputs: AnalysisResult["aiInputs"];
 
   for (const relativePath of files) {
     const absolutePath = join(root, relativePath);
@@ -179,14 +181,24 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   }
 
   if (options.aiFallback?.enabled) {
-    const fallback = await analyzeWithAiFallback(root, exclude, supportedExtensions, options.aiFallback);
-    if (fallback.runtime) warnings.push(`Model-assisted harness inference used ${fallback.runtime}.`);
-    evidence.push(...fallback.evidence.filter((item) => !evidence.some((existing) => existing.id === item.id)));
-    facts.push(...fallback.conventions.filter((item) => !facts.some((existing) => existing.id === item.id)));
-    const languagesByFile = new Map(fallback.languages.map((item) => [item.path, item.name]));
-    for (const language of languagesByFile.values()) languageCounts.set(language, (languageCounts.get(language) ?? 0) + 1);
-    files.push(...fallback.files.filter((path) => !files.includes(path)));
-    inferredArchitecture = fallback.architecture;
+    try {
+      const fallback = await analyzeWithAiFallback(root, exclude, supportedExtensions, options.aiFallback, options.review);
+      if (fallback.runtime) {
+        warnings.push(fallback.independentlyReviewed && fallback.reviewRuntime
+          ? `Model-assisted harness inference used ${fallback.runtime}; facts were independently reviewed by ${fallback.reviewRuntime}.`
+          : `Model-assisted harness inference used ${fallback.runtime}.`);
+      }
+      evidence.push(...fallback.evidence.filter((item) => !evidence.some((existing) => existing.id === item.id)));
+      facts.push(...fallback.conventions.filter((item) => !facts.some((existing) => existing.id === item.id)));
+      const languagesByFile = new Map(fallback.languages.map((item) => [item.path, item.name]));
+      for (const language of languagesByFile.values()) languageCounts.set(language, (languageCounts.get(language) ?? 0) + 1);
+      files.push(...fallback.files.filter((path) => !files.includes(path)));
+      inferredArchitecture = fallback.architecture;
+      aiInputs = fallback.inputs;
+    } catch (error) {
+      if (!(error instanceof InferenceUnavailableError) || options.aiFallback.provider !== "auto") throw error;
+      warnings.push(`${error.message} Continuing with deterministic analysis.`);
+    }
   }
 
   await analyzeConfigs(root, evidence, facts);
@@ -267,5 +279,6 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     architecture: renderArchitecture(projectName, modules, languages, hotspots, inferredArchitecture),
     hotspots,
     warnings,
+    aiInputs,
   };
 }

@@ -9,12 +9,12 @@ import {
   posixPath,
   readCriticalPaths,
   readText,
-  renderCodeowners,
   stagedChangeId,
   writeYaml,
 } from "@harnessme/core";
-import { info } from "../output.js";
+import { createProgress, info } from "../output.js";
 import { projectRoot } from "../project.js";
+import { syncHarness } from "@harnessme/renderers";
 
 function handles(value: string): string[] {
   const result = value.split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
@@ -38,17 +38,21 @@ const add = defineCommand({
   },
   async run({ args }) {
     const root = projectRoot(args.root);
+    const progress = createProgress(3);
+    progress.step("Registering the critical-path rule");
     const glob = posixPath(args.glob);
     if (glob.startsWith("/") || /^[A-Za-z]:\//u.test(glob) || glob.split("/").includes("..")) {
       throw new Error("Critical globs must stay relative to the repository root.");
     }
     const config = await readCriticalPaths(root);
     if (config.paths.some((entry) => entry.glob === glob)) throw new Error(`Critical path already exists: ${glob}`);
-    config.paths.push({ glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit" });
+    config.paths.push({ glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit", status: "active" });
     config.paths.sort((a, b) => a.glob.localeCompare(b.glob));
     await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
-    await renderCodeowners(root, config);
-    info(`Registered ${glob} and updated CODEOWNERS.`);
+    progress.step("Regenerating agent and governance integrations");
+    await syncHarness(root);
+    progress.done("Critical-path rule registered");
+    info(`Registered ${glob}; updated agent instructions, hooks, and CODEOWNERS.`);
   },
 });
 
@@ -58,7 +62,30 @@ const list = defineCommand({
   async run({ args }) {
     const config = await readCriticalPaths(projectRoot(args.root));
     if (!config.paths.length) return info("No explicit critical paths configured.");
-    for (const entry of config.paths) info(`${entry.glob}\t${entry.reason}\t${entry.approvers.map((item) => `@${item}`).join(",")}`);
+    for (const entry of config.paths) info(`${entry.status}\t${entry.glob}\t${entry.reason}\t${entry.approvers.map((item) => `@${item}`).join(",")}`);
+  },
+});
+
+const activate = defineCommand({
+  meta: { name: "activate", description: "Activate a proposed critical path after maintainer review" },
+  args: {
+    glob: { type: "positional", description: "Exact registered critical path glob", required: true },
+    root: { type: "string", description: "Repository root", valueHint: "path" },
+  },
+  async run({ args }) {
+    const root = projectRoot(args.root);
+    const progress = createProgress(3);
+    progress.step("Loading the proposed critical-path rule");
+    const config = await readCriticalPaths(root);
+    const rule = config.paths.find((entry) => entry.glob === posixPath(args.glob));
+    if (!rule) throw new Error(`No proposed critical path exists for: ${args.glob}`);
+    if (rule.status === "active") return info(`${rule.glob} is already active.`);
+    rule.status = "active";
+    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
+    progress.step("Regenerating agent and governance integrations");
+    await syncHarness(root);
+    progress.done("Critical-path rule activated");
+    info(`Activated ${rule.glob}; updated agent instructions, hooks, and CODEOWNERS.`);
   },
 });
 
@@ -126,5 +153,5 @@ const approve = defineCommand({
 
 export default defineCommand({
   meta: { name: "critical", description: "Manage critical-path rules and review records" },
-  subCommands: { add, list, draft, approve },
+  subCommands: { add, list, activate, draft, approve },
 });

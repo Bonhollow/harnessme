@@ -26,6 +26,7 @@ export interface FactsSnapshot {
   directives: string;
   criticalPaths: CriticalPaths;
   changes: VerifiedChanges;
+  authoredInstructions?: string;
 }
 
 export const harnessDir = (root: string): string => join(root, ".harnessme");
@@ -56,6 +57,7 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
   const base = harnessDir(root);
   const facts = join(base, "facts");
   const changesPath = join(facts, "changes.yaml");
+  const authoredPath = join(facts, "AGENTS.authored.md");
   const snapshot = {
     config: await readYaml(join(base, "harnessme.yaml"), HarnessConfigSchema),
     conventions: await readYaml(join(facts, "conventions.yaml"), ConventionsSchema),
@@ -67,6 +69,7 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
     changes: await exists(changesPath)
       ? await readYaml(changesPath, VerifiedChangesSchema)
       : defaultVerifiedChanges(),
+    authoredInstructions: await exists(authoredPath) ? await readText(authoredPath) : undefined,
   };
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const fact of snapshot.conventions.facts) {

@@ -280,5 +280,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     hotspots,
     warnings,
     aiInputs,
+    sourceFiles: [...new Set(files.map(posixPath))].sort(),
+    commands: packageData.commands,
   };
 }

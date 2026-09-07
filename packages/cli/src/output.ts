@@ -6,6 +6,14 @@ export function warn(message: string): void {
   process.stderr.write(`warning: ${message}\n`);
 }
 
+export function enabled(message: string): void {
+  process.stdout.write(`✓ ${message}\n`);
+}
+
+export function disabled(message: string): void {
+  process.stdout.write(`✗ ${message}\n`);
+}
+
 export function fail(message: string): never {
   throw new Error(message);
 }

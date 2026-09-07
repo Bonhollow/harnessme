@@ -8,6 +8,8 @@ export interface AnalysisResult {
   hotspots: Array<{ path: string; changes: number; fanIn: number; score: number }>;
   warnings: string[];
   aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
+  sourceFiles: string[];
+  commands: string[];
 }
 
 export interface AnalyzeOptions {

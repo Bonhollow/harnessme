@@ -39,4 +39,42 @@ describe("AGENTS.md renderer", () => {
     expect(output).toContain("changed `src/a.ts`");
     expect(output).toContain("Before editing a path matching any active rule below, stop and ask the developer");
   });
+
+  it("distributes an AI-authored document while retaining managed safety sections", () => {
+    const facts: FactsSnapshot = {
+      config: { schemaVersion: 1, targets: ["codex"], languages: ["TypeScript"], analysis: { exclude: [], maxFileBytes: 1000 }, distribution: { backend: "native" } },
+      conventions: { schemaVersion: 1, generatedAt: new Date().toISOString(), facts: [] },
+      stack: { schemaVersion: 1, generatedAt: new Date().toISOString(), languages: [], packageManagers: [], frameworks: [], dependencies: [], topLevelModules: [] },
+      evidence: [],
+      architecture: "# Observed architecture\n",
+      directives: "# Project directives\n",
+      criticalPaths: {
+        schemaVersion: 1,
+        paths: [{ glob: "src/core.ts", reason: "Shared public contract", approvers: ["owner"], source: "ai-reviewed", status: "active" }],
+        heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 },
+      },
+      changes: { schemaVersion: 1, changes: [] },
+      authoredInstructions: "# Repository instructions\n\n## AI-authored guidance\n\nUse the repository's boundaries.\n\n## Critical-path safety gate\n\nBefore editing a listed path, ask the developer for explicit confirmation.\n\n{{HARNESSME_CRITICAL_PATHS}}\n\n## Verified material changes\n\n{{HARNESSME_VERIFIED_CHANGES}}\n\n## Project directives\n\n{{HARNESSME_DIRECTIVES}}\n\n## Keeping this harness current\n\n{{HARNESSME_PENDING}}\n",
+    };
+    const output = renderAgentsMd(facts);
+    expect(output).toContain("## AI-authored guidance");
+    expect(output).toContain("`src/core.ts`: Shared public contract");
+    expect(output).toContain("HARNESSME:PENDING:START");
+    expect(output).not.toContain("{{HARNESSME_");
+  });
+
+  it("rejects altered AI templates with duplicate managed placeholders", () => {
+    const facts: FactsSnapshot = {
+      config: { schemaVersion: 1, targets: ["codex"], languages: [], analysis: { exclude: [], maxFileBytes: 1000 }, distribution: { backend: "native" } },
+      conventions: { schemaVersion: 1, generatedAt: new Date().toISOString(), facts: [] },
+      stack: { schemaVersion: 1, generatedAt: new Date().toISOString(), languages: [], packageManagers: [], frameworks: [], dependencies: [], topLevelModules: [] },
+      evidence: [],
+      architecture: "# Observed architecture\n",
+      directives: "# Project directives\n",
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+      changes: { schemaVersion: 1, changes: [] },
+      authoredInstructions: `# Repository instructions\n\n${"{{HARNESSME_CRITICAL_PATHS}}"}\n${"{{HARNESSME_CRITICAL_PATHS}}"}\n${"{{HARNESSME_VERIFIED_CHANGES}}"}\n${"{{HARNESSME_DIRECTIVES}}"}\n${"{{HARNESSME_PENDING}}"}\n`,
+    };
+    expect(() => renderAgentsMd(facts)).toThrow("exactly once");
+  });
 });

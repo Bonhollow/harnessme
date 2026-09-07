@@ -11,6 +11,13 @@ export interface InferenceRuntime {
 
 export class InferenceUnavailableError extends Error {}
 
+export type InferenceProviderId = "codex" | "claude-code" | "cursor" | "http";
+
+export interface AvailableModel {
+  id: string;
+  label: string;
+}
+
 interface ProcessResult { code: number | null; stdout: string; stderr: string }
 
 function executable(name: string): string {
@@ -33,6 +40,70 @@ async function run(command: string, args: string[], cwd: string, input = "", tim
 
 async function available(command: string): Promise<boolean> {
   try { return (await run(command, ["--version"], process.cwd(), "", 5_000)).code === 0; } catch { return false; }
+}
+
+export async function resolveInferenceProvider(config: AiReviewConfig): Promise<InferenceProviderId | undefined> {
+  if (config.provider === "http" || (config.provider === "auto" && !config.frameworks.length && config.endpoint)) return "http";
+  const requested = config.provider === "auto" ? config.frameworks : [config.provider];
+  for (const provider of requested) {
+    if (provider === "codex" && await available("codex")) return "codex";
+    if (provider === "claude-code" && await available("claude")) return "claude-code";
+    if (provider === "cursor" && (await available("cursor-agent") || await available("agent"))) return "cursor";
+  }
+  return undefined;
+}
+
+function parseModels(output: string): AvailableModel[] {
+  const models: AvailableModel[] = [];
+  for (const line of output.split(/\r?\n/u)) {
+    const match = line.trim().match(/^([^\s]+)\s+-\s+(.+)$/u);
+    if (match?.[1] && match[2] && !models.some((item) => item.id === match[1])) {
+      models.push({ id: match[1], label: match[2] });
+    }
+  }
+  return models;
+}
+
+export async function discoverAvailableModels(provider: InferenceProviderId, endpoint?: string, apiKeyEnv?: string): Promise<AvailableModel[]> {
+  if (provider === "codex") {
+    try {
+      const result = await run("codex", ["debug", "models"], process.cwd(), "", 15_000);
+      if (result.code !== 0) return [];
+      const payload = JSON.parse(result.stdout) as { models?: Array<{ slug?: string; display_name?: string; visibility?: string }> };
+      const visible = (payload.models ?? []).flatMap((model) =>
+        model.slug && model.visibility !== "hide"
+          ? [{ id: model.slug, label: model.display_name ?? model.slug }]
+          : []
+      );
+      return [...new Map(visible.map((model) => [model.id, model])).values()];
+    } catch {
+      return [];
+    }
+  }
+  if (provider === "cursor") {
+    const command = await available("cursor-agent") ? "cursor-agent" : "agent";
+    try {
+      const result = await run(command, ["--list-models"], process.cwd(), "", 15_000);
+      return result.code === 0 ? parseModels(result.stdout) : [];
+    } catch {
+      return [];
+    }
+  }
+  if (provider === "http" && endpoint) {
+    try {
+      const modelsUrl = endpoint.replace(/\/chat\/completions\/?$/u, "/models");
+      const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : undefined;
+      const headers: Record<string, string> = {};
+      if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+      const response = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(5_000) });
+      if (!response.ok) return [];
+      const payload = await response.json() as { data?: Array<{ id?: string }> };
+      return (payload.data ?? []).flatMap((item) => item.id ? [{ id: item.id, label: item.id }] : []);
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 function parseJsonText(value: string): unknown {
@@ -134,15 +205,14 @@ function httpRuntime(config: AiReviewConfig): InferenceRuntime {
 }
 
 export async function createInferenceRuntime(config: AiReviewConfig): Promise<InferenceRuntime> {
-  if (config.provider === "http" || (config.provider === "auto" && !config.frameworks.length && config.endpoint)) return httpRuntime(config);
-  const requested = config.provider === "auto" ? config.frameworks : [config.provider];
-  for (const provider of requested) {
-    if (provider === "codex" && await available("codex")) return codexRuntime(config);
-    if (provider === "claude-code" && await available("claude")) return claudeRuntime(config);
-    if (provider === "cursor") {
-      if (await available("cursor-agent")) return cursorRuntime(config, "cursor-agent");
-      if (await available("agent")) return cursorRuntime(config, "agent");
-    }
+  const resolved = await resolveInferenceProvider(config);
+  if (resolved === "http") return httpRuntime(config);
+  if (resolved === "codex") return codexRuntime(config);
+  if (resolved === "claude-code") return claudeRuntime(config);
+  if (resolved === "cursor") {
+    if (await available("cursor-agent")) return cursorRuntime(config, "cursor-agent");
+    return cursorRuntime(config, "agent");
   }
+  const requested = config.provider === "auto" ? config.frameworks : [config.provider];
   throw new InferenceUnavailableError(`No authenticated inference CLI is available for: ${requested.join(", ") || "the selected providers"}. Install/login to one or use --provider=http.`);
 }

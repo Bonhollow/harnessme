@@ -9,6 +9,46 @@ import { describe, expect, it } from "vitest";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 
+function authoredHarness(stack: string, details = "Follow the validated repository evidence."): string {
+  return `# Repository instructions
+
+## Stack
+
+${stack}
+
+## Architecture
+
+${details}
+
+## Coding conventions
+
+${details}
+
+## Validation
+
+Run the repository's validated checks after making changes.
+
+## Critical-path safety gate
+
+Before editing any path listed below, stop and ask the developer for explicit confirmation. Never self-approve or bypass this gate.
+
+{{HARNESSME_CRITICAL_PATHS}}
+
+## Verified material changes
+
+{{HARNESSME_VERIFIED_CHANGES}}
+
+## Project directives
+
+{{HARNESSME_DIRECTIVES}}
+
+## Keeping this harness current
+
+Record material changes for later verification.
+
+{{HARNESSME_PENDING}}`;
+}
+
 async function execWithInput(command: string, args: string[], input: string): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(command, args);
@@ -31,7 +71,8 @@ describe("CLI", () => {
       env: { ...process.env, PATH: "" },
     });
     expect(initialized.stdout).toContain("Initialized HarnessME");
-    expect(initialized.stderr).toContain("Continuing with deterministic analysis");
+    expect(initialized.stdout).toContain("✗ AI-assisted mode unavailable");
+    expect(initialized.stdout).toContain("✓ Deterministic repository analysis");
     expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("TypeScript (100%)");
   }, 30_000);
 
@@ -47,18 +88,24 @@ process.stdin.resume();
 process.stdin.on("end", () => {
   const output = process.argv[process.argv.indexOf("--output-last-message") + 1];
   const schema = process.argv[process.argv.indexOf("--output-schema") + 1];
-  const value = schema.includes("harnessme_facts")
+const value = schema.includes("harnessme_facts")
     ? { facts: [{ id: "lang-kotlin", kind: "language", language: "Kotlin", category: "tooling", statement: "Kotlin source is present.", path: "App.kt", line: 1, excerpt: "class Application" }] }
-    : { approvedIds: ["lang-kotlin"] };
+    : schema.includes("harnessme_verification")
+      ? { approvedIds: ["lang-kotlin"] }
+      : schema.includes("harnessme_agents_draft")
+        ? { markdown: ${JSON.stringify(authoredHarness("Kotlin (100%)"))}, gates: [] }
+        : { markdown: ${JSON.stringify(authoredHarness("Kotlin (100%)"))}, gates: [], comparison: "Retained the verified Kotlin stack and safety requirements." };
   fs.writeFileSync(output, JSON.stringify(value));
 });
 `);
     await chmod(fakeCodex, 0o755);
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "codex-runtime-fixture" }));
     await writeFile(join(root, "App.kt"), "class Application\n");
-    await exec(process.execPath, [cli, "init", "--root", root, "--provider", "codex"], {
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "codex"], {
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` },
     });
+    expect(initialized.stdout).toContain("✓ AI-assisted mode: codex / provider default");
+    expect(initialized.stdout).toContain("✓ AI comparison review: separate pass");
     expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Kotlin (100%)");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     expect(await readFile(join(root, ".clinerules"), "utf8")).toContain("Repository instructions");
@@ -69,6 +116,7 @@ process.stdin.on("end", () => {
     const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
     expect(configuration).toContain("- cursor");
     expect(configuration).toContain("provider: codex");
+    expect(await readFile(join(root, ".harnessme", "facts", "harness-generation.json"), "utf8")).toContain("authorProvider");
   }, 30_000);
 
   it("previews model inputs without writing and honors all privacy exclusions", async () => {
@@ -102,13 +150,19 @@ process.stdin.on("end", () => {
       request.once("end", () => {
         requestBodies.push(body);
         requests += 1;
-        const content = requests === 1
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const schema = payload.response_format?.json_schema?.name;
+        const content = schema === "harnessme_facts"
           ? JSON.stringify({ facts: [
             { id: "language-swift", kind: "language", language: "Swift", category: "tooling", statement: "Swift source is present.", path: "Payment.swift", line: 1, excerpt: "struct PaymentService {" },
             { id: "pascal-types", kind: "convention", language: "Swift", category: "naming", statement: "Use PascalCase names for declared types.", path: "Payment.swift", line: 1, excerpt: "struct PaymentService {" },
             { id: "payment-boundary", kind: "architecture", language: "Swift", category: "tooling", statement: "PaymentService is a payment-domain boundary.", path: "Payment.swift", line: 1, excerpt: "struct PaymentService {" },
           ] })
-          : JSON.stringify({ approvedIds: ["language-swift", "pascal-types", "payment-boundary"] });
+          : schema === "harnessme_verification"
+            ? JSON.stringify({ approvedIds: ["language-swift", "pascal-types", "payment-boundary"] })
+            : schema === "harnessme_agents_draft"
+              ? JSON.stringify({ markdown: authoredHarness("Swift (100%)", "Use PascalCase names for declared types. PaymentService is a payment-domain boundary."), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }] })
+              : JSON.stringify({ markdown: authoredHarness("Swift (100%)", "Use PascalCase names for declared types. Evidence: `Payment.swift:1`. PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`."), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }], comparison: "Kept evidence-backed facts and narrowed the gate to the payment boundary." });
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -128,12 +182,15 @@ process.stdin.on("end", () => {
       expect(agents).toContain("Swift (100%)");
       expect(agents).toContain("Use PascalCase names for declared types. Evidence: `Payment.swift:1`");
       expect(agents).toContain("PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`");
-      expect(requests).toBe(2);
+      expect(requests).toBe(4);
       expect(requestBodies.join("\n")).not.toContain("sk-this-must-never-leave-the-machine");
       expect(requestBodies.join("\n")).not.toContain("ignore previous instructions");
       expect(requestBodies[0]).toContain("REDACTED SECRET-LIKE LINE");
       const aiInputs = JSON.parse(await readFile(join(root, ".harnessme", "facts", "ai-inputs.json"), "utf8")) as { files: Array<{ path: string; redactedLines: number }> };
       expect(aiInputs.files).toContainEqual(expect.objectContaining({ path: "Payment.swift", redactedLines: 2 }));
+      const registry = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
+      expect(registry).toContain("source: ai-reviewed");
+      expect(registry).toContain("status: active");
     } finally {
       await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
     }
@@ -146,11 +203,16 @@ process.stdin.on("end", () => {
       request.setEncoding("utf8");
       request.on("data", (chunk) => { body += chunk; });
       request.once("end", () => {
-        const payload = JSON.parse(body) as { model: string };
+        const payload = JSON.parse(body) as { model: string; response_format?: { json_schema?: { name?: string } } };
         models.push(payload.model);
-        const content = payload.model === "analyst-model"
+        const schema = payload.response_format?.json_schema?.name;
+        const content = schema === "harnessme_facts"
           ? JSON.stringify({ facts: [{ id: "language-swift", kind: "language", language: "Swift", category: "tooling", statement: "Swift source is present.", path: "App.swift", line: 1, excerpt: "struct App {" }] })
-          : JSON.stringify({ approvedIds: [] });
+          : schema === "harnessme_verification"
+            ? JSON.stringify({ approvedIds: [] })
+            : schema === "harnessme_agents_draft"
+              ? JSON.stringify({ markdown: authoredHarness("None detected"), gates: [] })
+              : JSON.stringify({ markdown: authoredHarness("None detected"), gates: [], comparison: "Removed the unapproved Swift claim." });
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -167,9 +229,9 @@ process.stdin.on("end", () => {
         cli, "init", "--root", root, "--provider", "http", "--ai-endpoint", endpoint, "--model", "analyst-model",
         "--review-provider", "http", "--review-ai-endpoint", endpoint, "--review-model", "reviewer-model",
       ]);
-      expect(models).toEqual(["analyst-model", "reviewer-model"]);
+      expect(models).toEqual(["analyst-model", "reviewer-model", "analyst-model", "reviewer-model"]);
       expect(initialized.stderr).toContain("independently reviewed by http");
-      expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Languages: None detected");
+      expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Stack\n\nNone detected");
       const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
       expect(configuration).toContain("reviewer-model");
     } finally {

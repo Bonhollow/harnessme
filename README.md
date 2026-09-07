@@ -27,7 +27,7 @@ Initialize HarnessME from the root of an existing repository:
 harnessme init
 ```
 
-By default, `init` uses the first available signed-in inference CLI and writes integrations for every supported agent framework. If no supported AI CLI is available, `auto` completes with deterministic analysis and reports that fallback. The `--provider` option selects the model runtime used for inference; it does not limit generated files. Use `--targets codex,claude-code` only when you intentionally want a smaller output set.
+By default, `init` resolves the first available signed-in inference CLI and writes integrations for every supported agent framework. In an interactive terminal it then lists the provider's available models and asks you to select one; `--model` makes that choice non-interactively. If no supported AI CLI is available, `auto` completes with deterministic generation. The CLI prints `✓` or `✗` status lines showing the effective AI, review, and deterministic modes. The `--provider` option selects inference; it does not limit generated files. Use `--targets codex,claude-code` only when you intentionally want a smaller output set.
 
 This creates the facts store in `.harnessme/`, a generated `AGENTS.md`, provider files, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
 
@@ -41,35 +41,37 @@ When `harnessme init` runs, it:
 2. Reads package metadata, formatter and linter settings, type configuration, contribution documentation, and Git history.
 3. Detects the stack, repository structure, coding conventions, error-handling and object-design patterns, import hubs, and frequently changed files.
 4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation.
-5. Records high-impact files as proposed critical paths when their change-frequency or import fan-in score crosses the configured thresholds. Proposed paths do not block edits until a maintainer activates them.
-6. Compiles the validated facts, project directives, architecture, and critical-path rules into `AGENTS.md` and the selected provider files.
-7. Generates the governance backstops: `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
+5. Builds a deterministic `AGENTS.md` baseline and a bounded list of possible critical files and modules.
+6. In AI mode, asks the selected model to author the complete repository-specific `AGENTS.md`, including validation commands, coding guidance, and only the critical gates it considers justified by the supplied evidence.
+7. Runs a separate comparison pass—optionally through another provider/model—which compares the draft with the deterministic baseline, restores missing constraints, rejects unsupported claims, and reviews every selected gate.
+8. Enforces required safety language and managed placeholders locally, activates only reviewer-approved gates from the deterministic candidate list, then distributes the result to every selected framework.
+9. Generates the governance backstops: `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
 
 Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. Application source files are analyzed but not rewritten.
 
 ### Framework model inference and fallback
 
-Model-assisted analysis reuses the authentication and default model from Codex, Claude Code, or Cursor. Choose the analysis runtime with `--provider`; `auto` uses the first installed supported CLI:
+Model-assisted generation reuses the authentication from Codex, Claude Code, or Cursor. Choose the runtime with `--provider`; `auto` resolves the first installed supported CLI:
 
 ```text
 harnessme init --provider auto
 ```
 
-Select one explicitly or override its configured model when needed:
+When run in a terminal without `--model`, HarnessME asks you to select a model after resolving the provider. Codex and Cursor expose their available model catalogs; providers that cannot enumerate models offer their configured default or a manually entered model ID. Select everything explicitly for scripts and CI:
 
 ```text
 harnessme init --provider cursor --model your-model
 ```
 
-Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository—and asks for structured, evidence-cited facts. The model enriches deterministic analysis for supported languages and provides fallback analysis for missing grammars. It does not directly write `AGENTS.md` or governance files; HarnessME validates and renders those deterministically.
+Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. A separate inference pass compares and edits that document before HarnessME validates its required sections, explicit pre-edit confirmation rule, managed placeholders, and chosen gate paths.
 
-For a second opinion, assign a separate reviewer with `--review-provider`. The reviewer receives only locally validated proposed facts and must approve each one before it is stored. A different provider is recommended when available:
+For a second opinion, assign a separate reviewer with `--review-provider`. The reviewer verifies proposed facts before storage, then receives the redacted validated evidence bundle, deterministic baseline, and draft for the final comparison. A different provider is recommended when available:
 
 ```text
 harnessme init --provider codex --review-provider claude-code
 ```
 
-Without `--review-provider`, the selected analysis runtime performs the verification pass. AI review can enrich repository facts, but it cannot approve critical-path changes or alter the deterministic critical-path gate.
+Without `--review-provider`, the selected runtime performs a separate review call. With it, both fact verification and final-document comparison use the independent reviewer. AI may activate a critical gate only for a concrete file or module discovered by deterministic analysis; the local Git-content approval mechanism remains deterministic and still requires an authorized human reviewer.
 
 An OpenAI-compatible endpoint, including a local Ollama server, remains available when no framework CLI is suitable:
 
@@ -78,6 +80,8 @@ harnessme init --provider http --ai-endpoint http://localhost:11434/v1/chat/comp
 ```
 
 For an authenticated endpoint, add `--ai-api-key-env AI_API_KEY`. The reviewer endpoint equivalents are `--review-ai-endpoint`, `--review-model`, and `--review-ai-api-key-env`. Model inference examines text-like source files within configured size limits. Git-ignored files, common credential paths, `.harnessmeignore` entries, secret-like lines, and prompt-injection-like lines are excluded or redacted before inference. Proposed facts must pass schema validation, local file-and-line citation checks, and model verification before entering the facts store. The audit at `.harnessme/facts/ai-inputs.json` records paths, byte counts, and redaction counts—never file contents.
+
+The reviewed AI template is stored at `.harnessme/facts/AGENTS.authored.md`; `.harnessme/facts/harness-generation.json` records the author/reviewer runtimes, models, comparison summary, and activated gates. HarnessME owns the critical-path, directives, verified-changes, and pending-note placeholders so later governance commands can update them without discarding the reviewed document.
 
 Preview exactly which files would be included without contacting a model or writing the harness:
 
@@ -138,7 +142,7 @@ harnessme critical approve <record.md> --approver alice
 git add .harnessme/critical-log/<record.md> .harnessme/CRITICAL.md
 ```
 
-Heuristically detected paths begin as `proposed`. Review them first, then activate an accepted rule:
+In deterministic-only mode, heuristic paths begin as `proposed`. Review them first, then activate an accepted rule. In AI mode, the final comparison may activate evidence-backed core paths automatically and records them with source `ai-reviewed`:
 
 ```bash
 harnessme critical list
@@ -156,6 +160,7 @@ For registered paths, generated agent instructions require explicit developer co
 - Git history for hotspot detection and git-native critical-path checks
 - Import-graph fan-in and AST patterns for core-module and architecture detection
 - Authenticated Codex, Claude Code, or Cursor CLI sessions for optional model-assisted harness inference
+- Full AI authorship plus a separate baseline-comparison and correction pass for `AGENTS.md`
 - Claude Code hooks, Lefthook, GitHub Actions, and CODEOWNERS for governance backstops
 - Explicit labels distinguishing observed, AI-assisted, maintainer-authored, proposed, and active guidance
 
@@ -174,7 +179,7 @@ npm run test:package
 
 Releases are published through `.github/workflows/release.yml` using npm trusted publishing and provenance. Before the first automated release, configure this GitHub repository and the `release.yml` workflow as a trusted publisher in the npm package settings, enable two-factor authentication on maintainer accounts, and create the protected GitHub environment named `npm`.
 
-Set the version in `package.json`, commit it, create a matching tag such as `v0.2.0`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
+Set the version in `package.json`, commit it, create a matching tag such as `v0.3.0`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
 
 
 

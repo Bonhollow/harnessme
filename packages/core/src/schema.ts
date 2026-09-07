@@ -93,7 +93,7 @@ export const CriticalPathSchema = z.object({
   glob: z.string().min(1),
   reason: z.string().min(1),
   approvers: z.array(z.string().min(1)).min(1),
-  source: z.enum(["explicit", "heuristic"]).default("explicit"),
+  source: z.enum(["explicit", "heuristic", "ai-reviewed"]).default("explicit"),
   status: z.enum(["proposed", "active"]).default("active"),
 });
 

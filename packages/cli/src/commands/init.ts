@@ -9,14 +9,51 @@ import {
   exists,
   harnessDir,
   readText,
+  writeJson,
   writeFacts,
   writeVerifiedChanges,
   writeYaml,
+  type AiReviewConfig,
+  type FactsSnapshot,
 } from "@harnessme/core";
-import { analyzeProject, previewAiInputs } from "@harnessme/analyzers";
-import { GENERATED_MARKER, providers, resolveProviders, syncHarness } from "@harnessme/renderers";
-import { createProgress, info, warn } from "../output.js";
+import {
+  analyzeProject,
+  authorHarnessWithAi,
+  discoverAvailableModels,
+  previewAiInputs,
+  resolveInferenceProvider,
+  type InferenceProviderId,
+} from "@harnessme/analyzers";
+import { GENERATED_MARKER, providers, renderAgentsMd, resolveProviders, syncHarness } from "@harnessme/renderers";
+import { createProgress, disabled, enabled, info, warn } from "../output.js";
 import { projectRoot, providerValues } from "../project.js";
+import { selectModel } from "../selection.js";
+
+const providerIds = ["auto", "codex", "claude-code", "cursor", "http"] as const;
+
+function normalizeProvider(value: string, option: string): typeof providerIds[number] {
+  const normalized = value === "claude" ? "claude-code" : value;
+  if (!providerIds.includes(normalized as typeof providerIds[number])) {
+    throw new Error(`${option} must be auto, codex, claude-code, cursor, or http.`);
+  }
+  return normalized as typeof providerIds[number];
+}
+
+function frameworkList(provider: typeof providerIds[number]): Array<"codex" | "claude-code" | "cursor"> {
+  return provider === "auto"
+    ? ["codex", "claude-code", "cursor"]
+    : [provider].filter((id): id is "codex" | "claude-code" | "cursor" => ["codex", "claude-code", "cursor"].includes(id));
+}
+
+async function resolveModel(
+  provider: InferenceProviderId,
+  endpoint: string | undefined,
+  apiKeyEnv: string | undefined,
+  supplied: string | undefined,
+): Promise<string | undefined> {
+  const discover = !supplied && process.stdin.isTTY && process.stdout.isTTY;
+  return selectModel(provider, discover ? await discoverAvailableModels(provider, endpoint, apiKeyEnv) : [], supplied);
+}
 
 export default defineCommand({
   meta: { name: "init", description: "Analyze a repository and create its governed agent harness" },
@@ -47,49 +84,68 @@ export default defineCommand({
     const selected = resolveProviders(providerValues(args.targets) ?? providers.map((provider) => provider.id));
     const config = defaultConfig(selected.map((provider) => provider.id));
     if (!args.deterministic) {
-      const rawProvider = String(args.provider);
-      const inferenceProvider = rawProvider === "claude" ? "claude-code" : rawProvider;
-      if (!["auto", "codex", "claude-code", "cursor", "http"].includes(inferenceProvider)) {
-        throw new Error("--provider must be auto, codex, claude-code, cursor, or http.");
-      }
-      const model = typeof args.model === "string" ? args.model : undefined;
-      if (inferenceProvider === "http" && (!args.aiEndpoint || !model)) {
-        throw new Error("HTTP inference requires --ai-endpoint and --model.");
-      }
-      config.analysis.aiFallback = {
-        enabled: true,
-        provider: inferenceProvider as "auto" | "codex" | "claude-code" | "cursor" | "http",
-        frameworks: inferenceProvider === "auto"
-          ? ["codex", "claude-code", "cursor"]
-          : [inferenceProvider].filter((id): id is "codex" | "claude-code" | "cursor" => ["codex", "claude-code", "cursor"].includes(id)),
-        endpoint: typeof args.aiEndpoint === "string" ? args.aiEndpoint : undefined,
-        model,
+      const requestedProvider = normalizeProvider(String(args.provider), "--provider");
+      const endpoint = typeof args.aiEndpoint === "string" ? args.aiEndpoint : undefined;
+      if (requestedProvider === "http" && !endpoint) throw new Error("HTTP inference requires --ai-endpoint.");
+      const provisional: AiReviewConfig = {
+        provider: requestedProvider,
+        frameworks: frameworkList(requestedProvider),
+        endpoint,
+        model: typeof args.model === "string" ? args.model : undefined,
         apiKeyEnv: String(args.aiApiKeyEnv),
-        maxFiles: 20,
-        maxFileBytes: 65_536,
-        include: String(args.aiInclude).split(",").map((item) => item.trim()).filter(Boolean),
-        exclude: typeof args.aiExclude === "string" ? args.aiExclude.split(",").map((item) => item.trim()).filter(Boolean) : [],
       };
-      if (typeof args.reviewProvider === "string") {
-        const rawReviewProvider = args.reviewProvider;
-        const reviewProvider = rawReviewProvider === "claude" ? "claude-code" : rawReviewProvider;
-        if (!["auto", "codex", "claude-code", "cursor", "http"].includes(reviewProvider)) {
-          throw new Error("--review-provider must be auto, codex, claude-code, cursor, or http.");
-        }
-        const reviewModel = typeof args.reviewModel === "string" ? args.reviewModel : undefined;
-        if (reviewProvider === "http" && (!args.reviewAiEndpoint || !reviewModel)) {
-          throw new Error("HTTP review inference requires --review-ai-endpoint and --review-model.");
-        }
-        config.analysis.review = {
-          provider: reviewProvider as "auto" | "codex" | "claude-code" | "cursor" | "http",
-          frameworks: reviewProvider === "auto"
-            ? ["codex", "claude-code", "cursor"]
-            : [reviewProvider].filter((id): id is "codex" | "claude-code" | "cursor" => ["codex", "claude-code", "cursor"].includes(id)),
-          endpoint: typeof args.reviewAiEndpoint === "string" ? args.reviewAiEndpoint : undefined,
-          model: reviewModel,
-          apiKeyEnv: String(args.reviewAiApiKeyEnv),
+      const resolvedProvider = await resolveInferenceProvider(provisional);
+      if (!resolvedProvider) {
+        if (requestedProvider !== "auto") throw new Error(`The selected inference provider is not installed or authenticated: ${requestedProvider}.`);
+        disabled("AI-assisted mode unavailable; using deterministic-only generation");
+        enabled("Deterministic repository analysis");
+      } else {
+        const model = await resolveModel(resolvedProvider, endpoint, provisional.apiKeyEnv, provisional.model);
+        if (resolvedProvider === "http" && !model) throw new Error("HTTP inference requires --model (or an interactive model selection).");
+        config.analysis.aiFallback = {
+          enabled: true,
+          provider: resolvedProvider,
+          frameworks: frameworkList(resolvedProvider),
+          endpoint,
+          model,
+          apiKeyEnv: provisional.apiKeyEnv,
+          maxFiles: 20,
+          maxFileBytes: 65_536,
+          include: String(args.aiInclude).split(",").map((item) => item.trim()).filter(Boolean),
+          exclude: typeof args.aiExclude === "string" ? args.aiExclude.split(",").map((item) => item.trim()).filter(Boolean) : [],
         };
+        enabled(`AI-assisted mode: ${resolvedProvider} / ${model ?? "provider default"}`);
+        enabled("Deterministic repository analysis as the evidence foundation");
+
+        if (typeof args.reviewProvider === "string") {
+          const requestedReviewer = normalizeProvider(args.reviewProvider, "--review-provider");
+          const reviewEndpoint = typeof args.reviewAiEndpoint === "string" ? args.reviewAiEndpoint : undefined;
+          if (requestedReviewer === "http" && !reviewEndpoint) throw new Error("HTTP review inference requires --review-ai-endpoint.");
+          const provisionalReview: AiReviewConfig = {
+            provider: requestedReviewer,
+            frameworks: frameworkList(requestedReviewer),
+            endpoint: reviewEndpoint,
+            model: typeof args.reviewModel === "string" ? args.reviewModel : undefined,
+            apiKeyEnv: String(args.reviewAiApiKeyEnv),
+          };
+          const resolvedReviewer = await resolveInferenceProvider(provisionalReview);
+          if (!resolvedReviewer) throw new Error(`The selected review provider is not installed or authenticated: ${requestedReviewer}.`);
+          const reviewModel = await resolveModel(resolvedReviewer, reviewEndpoint, provisionalReview.apiKeyEnv, provisionalReview.model);
+          if (resolvedReviewer === "http" && !reviewModel) throw new Error("HTTP review inference requires --review-model (or an interactive model selection).");
+          config.analysis.review = {
+            ...provisionalReview,
+            provider: resolvedReviewer,
+            frameworks: frameworkList(resolvedReviewer),
+            model: reviewModel,
+          };
+          enabled(`Independent AI comparison review: ${resolvedReviewer} / ${reviewModel ?? "provider default"}`);
+        } else {
+          enabled("AI comparison review: separate pass with the selected model");
+        }
       }
+    } else {
+      disabled("AI-assisted mode disabled by --deterministic");
+      enabled("Deterministic-only repository analysis and harness generation");
     }
     if (args.aiPreview) {
       if (!config.analysis.aiFallback) throw new Error("--ai-preview requires model inference; remove --deterministic.");
@@ -101,7 +157,7 @@ export default defineCommand({
       for (const item of preview) info(`- ${item.path} (${item.bytes} bytes, ${item.redactedLines} redacted line(s))`);
       return;
     }
-    const progress = createProgress(6);
+    const progress = createProgress(config.analysis.aiFallback ? 8 : 6);
     progress.step("Preparing the HarnessME workspace");
     await mkdir(join(base, "facts"), { recursive: true });
     await mkdir(join(base, "critical-log"), { recursive: true });
@@ -114,8 +170,9 @@ export default defineCommand({
     }
     await writeYaml(join(base, "harnessme.yaml"), config);
     const criticalPaths = defaultCriticalPaths();
+    const initialChanges = defaultVerifiedChanges();
     await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-    await writeVerifiedChanges(root, defaultVerifiedChanges());
+    await writeVerifiedChanges(root, initialChanges);
 
     progress.step("Preserving existing repository instructions");
     let directives = "# Project directives\n\n";
@@ -172,12 +229,63 @@ export default defineCommand({
     }
     config.languages = analysis.stack.languages.map((language) => language.name);
     await writeYaml(join(base, "harnessme.yaml"), config);
+    if (config.analysis.aiFallback) {
+      const snapshot: FactsSnapshot = {
+        config,
+        conventions: analysis.conventions,
+        stack: analysis.stack,
+        evidence: analysis.evidence,
+        architecture: analysis.architecture,
+        directives,
+        criticalPaths,
+        changes: initialChanges,
+      };
+      const authored = await authorHarnessWithAi({
+        facts: snapshot,
+        analysis,
+        deterministicBaseline: renderAgentsMd(snapshot),
+        inference: config.analysis.aiFallback,
+        review: config.analysis.review,
+        onPhase: (message) => progress.step(message),
+      });
+      for (const gate of authored.gates) {
+        const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
+        if (existing) {
+          existing.reason = gate.reason;
+          existing.source = "ai-reviewed";
+          existing.status = "active";
+        } else {
+          criticalPaths.paths.push({
+            glob: gate.path,
+            reason: gate.reason,
+            approvers,
+            source: "ai-reviewed",
+            status: "active",
+          });
+        }
+      }
+      await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+      await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
+      await writeJson(join(base, "facts", "harness-generation.json"), {
+        generatedAt: new Date().toISOString(),
+        authorProvider: authored.authorRuntime,
+        authorModel: config.analysis.aiFallback.model ?? "provider-default",
+        reviewerProvider: authored.reviewerRuntime,
+        reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
+        comparison: authored.comparison,
+        activatedGates: authored.gates,
+      });
+    } else {
+      progress.step("Rendering the deterministic instruction baseline");
+    }
     progress.step("Generating instructions and governance integrations");
     const result = await syncHarness(root);
     progress.done("Harness created");
     for (const message of analysis.warnings) warn(message);
     info(`Initialized HarnessME with targets: ${result.targets.join(", ")}.`);
-    info(`Detected ${criticalPaths.paths.length} proposed critical path candidate(s). Review and activate them with \`harnessme critical activate <glob>\`, then run \`harnessme hooks install\`.`);
+    const activeCount = criticalPaths.paths.filter((entry) => entry.status === "active").length;
+    const proposedCount = criticalPaths.paths.filter((entry) => entry.status === "proposed").length;
+    info(`Critical paths: ${activeCount} active, ${proposedCount} proposed. Review .harnessme/critical-paths.yaml, then run \`harnessme hooks install\`.`);
     info(`Generated ${result.files.join(", ")}.`);
   },
 });

@@ -9,17 +9,15 @@ It is a local, scriptable CLI: no account, dashboard, or hosted service required
 Requires Node.js 20.19 or newer on Windows, macOS, or Linux.
 
 ```bash
-npm install --global harnessme
+npm install -g harnessme
 harnessme --version
 ```
 
+After this, run every command directly as `harnessme …` from the repository you want to analyze.
+
 For model-assisted generation, install and sign in to at least one supported framework CLI: Codex, Claude Code, or Cursor. Use `--deterministic` when you want a fully local run without model inference.
 
-For a one-off run:
 
-```bash
-npx harnessme init --provider codex
-```
 
 ## Use
 
@@ -112,6 +110,8 @@ Use `harnessme providers list` to see inference providers and `harnessme targets
 - Authenticated Codex, Claude Code, or Cursor CLI sessions for optional model-assisted harness inference
 - Claude Code hooks, Lefthook, GitHub Actions, and CODEOWNERS for governance backstops
 
+
+
 ## Development
 
 ```bash
@@ -119,6 +119,8 @@ npm install
 npm run lint
 npm test
 ```
+
+
 
 ## License
 

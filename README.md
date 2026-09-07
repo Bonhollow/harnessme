@@ -179,7 +179,7 @@ npm run test:package
 
 Releases are published through `.github/workflows/release.yml` using npm trusted publishing and provenance. Before the first automated release, configure this GitHub repository and the `release.yml` workflow as a trusted publisher in the npm package settings, enable two-factor authentication on maintainer accounts, and create the protected GitHub environment named `npm`.
 
-Set the version in `package.json`, commit it, create a matching tag such as `v0.3.1`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
+Set the version in `package.json`, commit it, create a matching tag such as `v0.3.2`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
 
 
 

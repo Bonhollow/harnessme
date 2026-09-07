@@ -76,6 +76,44 @@ describe("CLI", () => {
     expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("TypeScript (100%)");
   }, 30_000);
 
+  it("merges the gate into an empty or comment-only Lefthook configuration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-empty-lefthook-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "empty-lefthook-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "lefthook.yml"), "# Project-local hooks are configured here.\n");
+
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+
+    expect(initialized.stdout).toContain("Initialized HarnessME");
+    expect(await readFile(join(root, "lefthook.yml"), "utf8")).toContain("harnessme:");
+  }, 30_000);
+
+  it("merges the gate into an empty Lefthook configuration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-blank-lefthook-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "blank-lefthook-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "lefthook.yml"), "");
+
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+
+    expect(await readFile(join(root, "lefthook.yml"), "utf8")).toContain("harnessme:");
+  }, 30_000);
+
+  it.each([
+    ["a malformed document", "pre-commit: ["],
+    ["a scalar document", "disabled\n"],
+    ["a sequence document", "[]\n"],
+    ["a sequence commands section", "pre-commit:\n  commands: []\n"],
+  ])("preserves Lefthook config with %s", async (_label, source) => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-invalid-lefthook-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "invalid-lefthook-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "lefthook.yml"), source);
+
+    await expect(exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"])).rejects.toThrow("Cannot merge HarnessME gate into invalid YAML");
+    expect(await readFile(join(root, "lefthook.yml"), "utf8")).toBe(source);
+  }, 30_000);
+
   it.skipIf(process.platform === "win32")("reuses the selected Codex runtime for harness inference", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-codex-runtime-"));
     const bin = join(root, "bin");

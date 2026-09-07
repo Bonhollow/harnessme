@@ -1,0 +1,55 @@
+{
+  "name": "harnessme",
+  "version": "0.1.0",
+  "description": "Derive, distribute, and govern AI coding-agent instructions from the codebase itself.",
+  "type": "module",
+  "bin": {
+    "harnessme": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx packages/cli/src/cli.ts",
+    "lint": "tsc --noEmit",
+    "test": "npm run build && vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "keywords": [
+    "agents-md",
+    "ai-agents",
+    "codex",
+    "claude-code",
+    "cursor",
+    "developer-tools"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@iarna/toml": "2.2.5",
+    "@intellectronica/ruler": "0.3.44",
+    "@vscode/tree-sitter-wasm": "0.3.1",
+    "citty": "0.2.2",
+    "fast-glob": "3.3.3",
+    "gray-matter": "4.0.3",
+    "js-yaml": "4.3.2",
+    "lefthook": "2.1.12",
+    "minimatch": "10.2.6",
+    "web-tree-sitter": "0.27.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "24.3.1",
+    "tsup": "8.5.0",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.7"
+  }
+}

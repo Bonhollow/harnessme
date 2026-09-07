@@ -1,0 +1,24 @@
+name: Adapter request
+description: Request support or an update for an AI coding tool
+title: "[Adapter]: "
+labels: [adapter]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool and version
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Official format documentation
+    validations:
+      required: true
+  - type: textarea
+    id: capability
+    attributes:
+      label: Capability beyond AGENTS.md
+      description: Explain what tool-native output adds beyond standard AGENTS.md support.
+    validations:
+      required: true

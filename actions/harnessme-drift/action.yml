@@ -1,0 +1,16 @@
+name: HarnessME drift check
+description: Validate pending notes and fail when repository facts have drifted
+inputs:
+  version:
+    description: HarnessME npm version
+    required: false
+    default: "0.1.0"
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: npx --yes "harnessme@${{ inputs.version }}" validate --ci
+    - shell: bash
+      run: git diff --exit-code
+    - shell: bash
+      run: npx --yes "harnessme@${{ inputs.version }}" check --ci

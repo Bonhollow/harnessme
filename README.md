@@ -63,7 +63,7 @@ When run in a terminal without `--model`, HarnessME asks you to select a model a
 harnessme init --provider cursor --model your-model
 ```
 
-Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. A separate inference pass compares and edits that document before HarnessME validates its required sections, explicit pre-edit confirmation rule, managed placeholders, and chosen gate paths.
+Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. A separate inference pass compares and edits that document before HarnessME validates its required sections, explicit pre-edit confirmation rule, managed placeholders, and chosen gate paths. If that output fails local validation, HarnessME requests one focused correction; if the correction is still invalid, it visibly falls back to the safe deterministic renderer instead of leaving initialization incomplete.
 
 For a second opinion, assign a separate reviewer with `--review-provider`. The reviewer verifies proposed facts before storage, then receives the redacted validated evidence bundle, deterministic baseline, and draft for the final comparison. A different provider is recommended when available:
 
@@ -179,7 +179,7 @@ npm run test:package
 
 Releases are published through `.github/workflows/release.yml` using npm trusted publishing and provenance. Before the first automated release, configure this GitHub repository and the `release.yml` workflow as a trusted publisher in the npm package settings, enable two-factor authentication on maintainer accounts, and create the protected GitHub environment named `npm`.
 
-Set the version in `package.json`, commit it, create a matching tag such as `v0.3.0`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
+Set the version in `package.json`, commit it, create a matching tag such as `v0.3.1`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
 
 
 

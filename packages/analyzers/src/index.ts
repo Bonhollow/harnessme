@@ -8,4 +8,8 @@ export {
   type AvailableModel,
   type InferenceProviderId,
 } from "./inference.js";
-export { authorHarnessWithAi, type AuthoredHarnessResult } from "./harness-author.js";
+export {
+  AuthoredHarnessValidationError,
+  authorHarnessWithAi,
+  type AuthoredHarnessResult,
+} from "./harness-author.js";

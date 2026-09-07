@@ -18,6 +18,7 @@ import {
 } from "@harnessme/core";
 import {
   analyzeProject,
+  AuthoredHarnessValidationError,
   authorHarnessWithAi,
   discoverAvailableModels,
   previewAiInputs,
@@ -240,41 +241,57 @@ export default defineCommand({
         criticalPaths,
         changes: initialChanges,
       };
-      const authored = await authorHarnessWithAi({
-        facts: snapshot,
-        analysis,
-        deterministicBaseline: renderAgentsMd(snapshot),
-        inference: config.analysis.aiFallback,
-        review: config.analysis.review,
-        onPhase: (message) => progress.step(message),
-      });
-      for (const gate of authored.gates) {
-        const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
-        if (existing) {
-          existing.reason = gate.reason;
-          existing.source = "ai-reviewed";
-          existing.status = "active";
-        } else {
-          criticalPaths.paths.push({
-            glob: gate.path,
-            reason: gate.reason,
-            approvers,
-            source: "ai-reviewed",
-            status: "active",
-          });
+      try {
+        const authored = await authorHarnessWithAi({
+          facts: snapshot,
+          analysis,
+          deterministicBaseline: renderAgentsMd(snapshot),
+          inference: config.analysis.aiFallback,
+          review: config.analysis.review,
+          onPhase: (message) => progress.step(message),
+        });
+        for (const gate of authored.gates) {
+          const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
+          if (existing) {
+            existing.reason = gate.reason;
+            existing.source = "ai-reviewed";
+            existing.status = "active";
+          } else {
+            criticalPaths.paths.push({
+              glob: gate.path,
+              reason: gate.reason,
+              approvers,
+              source: "ai-reviewed",
+              status: "active",
+            });
+          }
         }
+        await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+        await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
+        await writeJson(join(base, "facts", "harness-generation.json"), {
+          status: "ai-reviewed",
+          generatedAt: new Date().toISOString(),
+          authorProvider: authored.authorRuntime,
+          authorModel: config.analysis.aiFallback.model ?? "provider-default",
+          reviewerProvider: authored.reviewerRuntime,
+          reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
+          comparison: authored.comparison,
+          activatedGates: authored.gates,
+        });
+      } catch (error) {
+        if (!(error instanceof AuthoredHarnessValidationError)) throw error;
+        disabled("AI-authored document rejected after repair; using the deterministic renderer");
+        warn(error.message);
+        progress.step("Falling back to validated deterministic instructions");
+        await writeJson(join(base, "facts", "harness-generation.json"), {
+          status: "deterministic-fallback",
+          generatedAt: new Date().toISOString(),
+          authorModel: config.analysis.aiFallback.model ?? "provider-default",
+          reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
+          reason: error.message,
+          activatedGates: [],
+        });
       }
-      await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-      await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
-      await writeJson(join(base, "facts", "harness-generation.json"), {
-        generatedAt: new Date().toISOString(),
-        authorProvider: authored.authorRuntime,
-        authorModel: config.analysis.aiFallback.model ?? "provider-default",
-        reviewerProvider: authored.reviewerRuntime,
-        reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
-        comparison: authored.comparison,
-        activatedGates: authored.gates,
-      });
     } else {
       progress.step("Rendering the deterministic instruction baseline");
     }

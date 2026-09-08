@@ -196,6 +196,14 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
     append("Invariants", `- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`);
     append("Change workflow", "1. Inspect the owning implementation, callers, and nearby tests.\n2. Update affected consumers and tests together.\n3. Run the relevant validated checks.");
     append("Validation", "Run the repository's validated checks relevant to the changed behavior.");
+    const responsibilities = sectionBody(markdown, "## Responsibilities");
+    if (!/`[^`]+`/u.test(responsibilities) || !/\b(?:own|keep|use|route|implement|extend|call)\b/iu.test(responsibilities)) {
+      markdown = markdown.replace("## Responsibilities", `## Responsibilities\n\n- Own changes within \`${value.scope}\` through the existing implementation seam.`);
+    }
+    const invariants = sectionBody(markdown, "## Invariants");
+    if (!/\b(?:must|preserve|never|do not|keep|remain)\b/iu.test(invariants)) {
+      markdown = markdown.replace("## Invariants", `## Invariants\n\n- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`);
+    }
     return { ...value, markdown };
   };
   const compositeScope = /[,;{}]/u.test(reference.scope);

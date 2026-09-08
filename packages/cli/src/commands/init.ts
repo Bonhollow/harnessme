@@ -1,4 +1,4 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, rm, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import {
@@ -21,7 +21,6 @@ import {
 } from "@harnessme/core";
 import {
   analyzeProject,
-  AuthoredHarnessValidationError,
   authorHarnessWithAi,
   criticalCandidates,
   discoverAvailableModels,
@@ -84,6 +83,15 @@ export default defineCommand({
   async run({ args }) {
     const root = projectRoot(args.root);
     const base = harnessDir(root);
+    let createdIgnore = false;
+    let importedAgents: string | undefined;
+    let importedRulerAgents: string | undefined;
+    const removePartialAiHarness = async (): Promise<void> => {
+      await rm(base, { recursive: true, force: true });
+      if (createdIgnore) await unlink(join(root, ".harnessmeignore"));
+      if (importedAgents !== undefined) await atomicWrite(agentsPath, importedAgents);
+      if (importedRulerAgents !== undefined) await atomicWrite(rulerAgentsPath, importedRulerAgents);
+    };
     if (await exists(base)) {
       throw new Error(`HarnessME is already initialized at ${root}. Use \`harnessme refresh\` to reanalyze it or \`harnessme sync\` to rerender stored facts.`);
     }
@@ -106,8 +114,7 @@ export default defineCommand({
       const resolvedProvider = await resolveInferenceProvider(provisional);
       if (!resolvedProvider) {
         if (requestedProvider !== "auto") throw new Error(`The selected inference provider is not installed or authenticated: ${requestedProvider}.`);
-        disabled("AI-assisted mode unavailable; using deterministic-only generation");
-        enabled("Deterministic repository analysis");
+        throw new Error("No authenticated AI inference provider is available. Authenticate Codex, Claude Code, or Cursor, choose an available provider, or explicitly opt in to local-only generation with --deterministic.");
       } else {
         const model = await resolveModel(resolvedProvider, endpoint, provisional.apiKeyEnv, provisional.model);
         if (resolvedProvider === "http" && !model) throw new Error("HTTP inference requires --model (or an interactive model selection).");
@@ -176,6 +183,7 @@ export default defineCommand({
         join(root, ".harnessmeignore"),
         "# Additional paths that HarnessME must never send to model inference.\n# Built-in exclusions already cover common keys, credentials, .env files, and secret directories.\n",
       );
+      createdIgnore = true;
     }
     await writeYaml(join(base, "harnessme.yaml"), config);
     const criticalPaths = defaultCriticalPaths();
@@ -189,6 +197,7 @@ export default defineCommand({
     if (await exists(agentsPath)) {
       const existing = await readText(agentsPath);
       if (!existing.startsWith(GENERATED_MARKER)) {
+        importedAgents = existing;
         directives += `## Imported from the pre-existing AGENTS.md\n\n${existing.trim()}\n\n`;
         await atomicWrite(join(base, "imported-AGENTS.md"), existing);
         await unlink(agentsPath);
@@ -199,6 +208,7 @@ export default defineCommand({
     if (await exists(rulerAgentsPath)) {
       const existing = await readText(rulerAgentsPath);
       if (!existing.startsWith(GENERATED_MARKER)) {
+        importedRulerAgents = existing;
         directives += `## Imported from the pre-existing .ruler/AGENTS.md\n\n${existing.trim()}\n\n`;
         await atomicWrite(join(base, "imported-ruler-AGENTS.md"), existing);
         await unlink(rulerAgentsPath);
@@ -215,7 +225,15 @@ export default defineCommand({
     );
 
     progress.step("Analyzing source, configuration, dependencies, and history");
-    const analysis = await analyzeProject({ root, ...config.analysis });
+    let analysis: Awaited<ReturnType<typeof analyzeProject>>;
+    try {
+      analysis = await analyzeProject({ root, ...config.analysis });
+    } catch (error) {
+      if (!config.analysis.aiFallback) throw error;
+      await removePartialAiHarness();
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`AI harness analysis failed; no HarnessME artifacts were created: ${reason}`);
+    }
     progress.step("Saving evidence and critical-path candidates");
     await writeFacts(root, analysis);
     const approvers = String(args.criticalApprovers).split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
@@ -262,8 +280,9 @@ export default defineCommand({
         changes: initialChanges,
         documentationConflicts: analysis.documentationConflicts,
       };
+      let authored: Awaited<ReturnType<typeof authorHarnessWithAi>>;
       try {
-        const authored = await authorHarnessWithAi({
+        authored = await authorHarnessWithAi({
           facts: snapshot,
           analysis,
           deterministicBaseline: renderAgentsMd(snapshot),
@@ -272,56 +291,47 @@ export default defineCommand({
           councilSize: config.analysis.councilSize,
           onPhase: (message) => progress.step(message),
         });
-        for (const gate of authored.gates) {
-          const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
-          if (existing) {
-            existing.reason = gate.reason;
-            existing.source = "ai-reviewed";
-            existing.status = "active";
-            existing.risk = gate.risk;
-          } else {
-            criticalPaths.paths.push({
-              glob: gate.path,
-              reason: gate.reason,
-              approvers,
-              source: "ai-reviewed",
-              status: "active",
-              risk: gate.risk,
-            });
-          }
-        }
-        await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-        await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
-        await writeJson(join(base, "facts", "references.json"), {
-          schemaVersion: 1,
-          generatedAt: new Date().toISOString(),
-          documents: authored.references,
-        });
-        await writeJson(join(base, "facts", "harness-generation.json"), {
-          status: "ai-reviewed",
-          generatedAt: new Date().toISOString(),
-          authorProvider: authored.authorRuntime,
-          authorModel: config.analysis.aiFallback.model ?? "provider-default",
-          reviewerProvider: authored.reviewerRuntime,
-          reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
-          comparison: authored.comparison,
-          passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
-          activatedGates: authored.gates,
-        });
       } catch (error) {
-        if (!(error instanceof AuthoredHarnessValidationError)) throw error;
-        disabled("AI-authored document rejected after repair; using the deterministic renderer");
-        warn(error.message);
-        progress.step("Falling back to validated deterministic instructions");
-        await writeJson(join(base, "facts", "harness-generation.json"), {
-          status: "deterministic-fallback",
-          generatedAt: new Date().toISOString(),
-          authorModel: config.analysis.aiFallback.model ?? "provider-default",
-          reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
-          reason: error.message,
-          activatedGates: [],
-        });
+        await removePartialAiHarness();
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`AI harness generation failed; no HarnessME artifacts were created: ${reason}`);
       }
+      for (const gate of authored.gates) {
+        const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
+        if (existing) {
+          existing.reason = gate.reason;
+          existing.source = "ai-reviewed";
+          existing.status = "active";
+          existing.risk = gate.risk;
+        } else {
+          criticalPaths.paths.push({
+            glob: gate.path,
+            reason: gate.reason,
+            approvers,
+            source: "ai-reviewed",
+            status: "active",
+            risk: gate.risk,
+          });
+        }
+      }
+      await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+      await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
+      await writeJson(join(base, "facts", "references.json"), {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        documents: authored.references,
+      });
+      await writeJson(join(base, "facts", "harness-generation.json"), {
+        status: "ai-reviewed",
+        generatedAt: new Date().toISOString(),
+        authorProvider: authored.authorRuntime,
+        authorModel: config.analysis.aiFallback.model ?? "provider-default",
+        reviewerProvider: authored.reviewerRuntime,
+        reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
+        comparison: authored.comparison,
+        passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
+        activatedGates: authored.gates,
+      });
     } else {
       progress.step("Rendering the deterministic instruction baseline");
     }

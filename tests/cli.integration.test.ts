@@ -120,17 +120,53 @@ describe("CLI", () => {
     expect(quality.stdout).toContain("documentation/code conflict");
   }, 30_000);
 
-  it("falls back to deterministic analysis when auto finds no inference CLI", async () => {
-    const root = await mkdtemp(join(tmpdir(), "harnessme-auto-fallback-"));
-    await writeFile(join(root, "package.json"), JSON.stringify({ name: "auto-fallback-fixture" }));
+  it("requires explicit deterministic mode when auto finds no inference CLI", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-auto-no-inference-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "auto-no-inference-fixture" }));
     await writeFile(join(root, "app.ts"), "export const value = 1;\n");
-    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--targets", "codex"], {
+    await expect(exec(process.execPath, [cli, "init", "--root", root, "--targets", "codex"], {
       env: { ...process.env, PATH: "" },
+    })).rejects.toThrow("No authenticated AI inference provider is available");
+    await expect(access(join(root, "AGENTS.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(root, ".harnessme"))).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30_000);
+
+  it("does not render a deterministic harness when AI authorship remains invalid", async () => {
+    const invalidMarkdown = "# Repository instructions\n\nThis deliberately omits every required operating section so validation must reject it. ".repeat(3);
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.once("end", () => {
+        const schema = (JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } }).response_format?.json_schema?.name;
+        const content = schema === "harnessme_facts"
+          ? JSON.stringify({ facts: [] })
+          : schema === "harnessme_verification"
+            ? JSON.stringify({ approvedIds: [] })
+            : schema === "harnessme_agents_draft"
+              ? JSON.stringify({ markdown: invalidMarkdown, gates: [], references: [] })
+              : JSON.stringify({ markdown: invalidMarkdown, gates: [], references: [], comparison: "Invalid fixture." });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      });
     });
-    expect(initialized.stdout).toContain("Initialized HarnessME");
-    expect(initialized.stdout).toContain("✗ AI-assisted mode unavailable");
-    expect(initialized.stdout).toContain("✓ Deterministic repository analysis");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Operating rules");
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Test AI server did not expose a port.");
+      const root = await mkdtemp(join(tmpdir(), "harnessme-invalid-ai-"));
+      await writeFile(join(root, "package.json"), JSON.stringify({ name: "invalid-ai-fixture" }));
+      await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+      await expect(exec(process.execPath, [
+        cli, "init", "--root", root, "--provider", "http",
+        "--ai-endpoint", `http://127.0.0.1:${address.port}/v1/chat/completions`, "--model", "test-model",
+      ])).rejects.toThrow("AI harness generation failed; no HarnessME artifacts were created");
+      await expect(access(join(root, "AGENTS.md"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(join(root, ".harnessme"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(join(root, ".harnessmeignore"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+    }
   }, 30_000);
 
   it("merges the gate into an empty or comment-only Lefthook configuration", async () => {
@@ -361,8 +397,15 @@ const value = schema.includes("harnessme_facts")
     const proposedGate = await exec(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root]);
     expect(proposedGate.stdout).toContain("Critical gate passed");
     await exec(process.execPath, [cli, "critical", "activate", "core.ts", "--root", root]);
+    const activeAgents = await readFile(join(root, "AGENTS.md"), "utf8");
+    expect(activeAgents).toContain("`core.ts`");
+    expect(activeAgents).toContain("ask the developer for explicit confirmation");
     const activeGate = await execWithInput(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root], "");
     expect(activeGate.code).toBe(2);
+    await exec(process.execPath, [cli, "critical", "remove", "core.ts", "--root", root]);
+    const removedGate = await exec(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root]);
+    expect(removedGate.stdout).toContain("Critical gate passed");
+    expect(await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8")).not.toContain("glob: core.ts");
   }, 30_000);
 
   it("initializes, renders, and detects drift in a mixed-language repository", async () => {

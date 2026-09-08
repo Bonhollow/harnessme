@@ -1,15 +1,15 @@
 import {
   SelectRenderableEvents,
-  TextRenderable,
   createCliRenderer,
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
-import { configureInference, removeHarnessState, resolveInferenceChoice, runCli, type InferenceChoice } from "./actions.js";
+import { readFacts } from "@harnessme/core";
+import { configureInference, removeHarnessState, resolveInferenceChoice, runCli, type InferenceChoice, type OperationOutput } from "./actions.js";
 import { loadDashboardState } from "./state.js";
-import { buildDashboard, buildSelectionScreen } from "./view.js";
+import { buildDashboard, buildOperationScreen, buildSelectionScreen } from "./view.js";
 
-interface Action { label: string; description: string; run: () => Promise<void> }
+interface Action { label: string; description: string; run: (onOutput: OperationOutput) => Promise<void> }
 
 async function selectOption(
   title: string,
@@ -53,17 +53,18 @@ async function chooseInference(): Promise<InferenceChoice | undefined> {
   return { deterministic: false, provider: resolved.provider, model: model.value as string | undefined };
 }
 
-async function showMessage(title: string, message: string): Promise<void> {
+async function showOperation(title: string, operation: (onOutput: OperationOutput) => Promise<void>): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
-  const text = new TextRenderable(renderer, {
-    content: `${title}\n\n${message}\n\nPress any key to return.`,
-    fg: "#e2e8f0",
-    bg: "#0b1020",
-    width: "100%",
-    height: "100%",
-    padding: 2,
-  });
-  renderer.root.add(text);
+  const screen = buildOperationScreen(renderer, title);
+  let message = "Operation complete. Press any key to return to the dashboard.";
+  try {
+    await operation(screen.append);
+    screen.append(`\n✓ ${message}\n`);
+  } catch (error) {
+    message = "Operation failed. Press any key to return to the dashboard.";
+    screen.append(`\n✗ ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+  screen.finish(message);
   await new Promise<void>((resolve) => renderer.keyInput.once("keypress", () => resolve()));
   renderer.destroy();
 }
@@ -78,6 +79,32 @@ async function confirmRemoval(): Promise<boolean> {
     ],
   );
   return selected?.value === true;
+}
+
+async function chooseGate(root: string, status: "active" | "proposed", verb: "activate" | "remove"): Promise<string | undefined> {
+  const facts = await readFacts(root);
+  const gates = facts.criticalPaths.paths.filter((gate) => gate.status === status);
+  if (!gates.length) throw new Error(`No ${status} critical gates are available to ${verb}.`);
+  const selected = await selectOption(
+    `${verb === "activate" ? "Activate" : "Remove"} critical gate`,
+    verb === "activate"
+      ? "AI-recognized candidates become protected: agents must ask before editing them."
+      : "Removing this protection lets agents edit the path without the critical-change gate.",
+    gates.map((gate) => ({ name: gate.glob, description: `${gate.risk ?? "other"}: ${gate.reason}`, value: gate.glob })),
+  );
+  if (!selected) return undefined;
+  if (verb === "remove") {
+    const confirmed = await selectOption(
+      `Remove gate for ${selected.value as string}?`,
+      "This removes the pre-edit confirmation and Git approval requirement for this path.",
+      [
+        { name: "Cancel", description: "Keep the critical protection.", value: false },
+        { name: "Remove gate", description: "Remove this path from critical protection.", value: true },
+      ],
+    );
+    if (confirmed?.value !== true) return undefined;
+  }
+  return selected.value as string;
 }
 
 async function dashboardSelection(root: string, actions: Action[]): Promise<Action | undefined> {
@@ -108,37 +135,40 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
-      { label: "Refresh with AI", description: "Use the configured provider and model.", run: async () => runCli(root, ["refresh"]) },
-      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", run: async () => runCli(root, ["refresh", "--deterministic"]) },
-      { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", run: async () => {
+      { label: "Refresh with AI", description: "Use the configured provider and model.", run: async (onOutput) => runCli(root, ["refresh"], onOutput) },
+      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", run: async (onOutput) => runCli(root, ["refresh", "--deterministic"], onOutput) },
+      { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", run: async (onOutput) => {
         const choice = await chooseInference();
         if (!choice) return;
         await configureInference(root, choice);
-        await runCli(root, choice.deterministic ? ["refresh", "--deterministic"] : ["refresh"]);
+        await runCli(root, choice.deterministic ? ["refresh", "--deterministic"] : ["refresh"], onOutput);
       } },
-      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", run: async () => runCli(root, ["quality"]) },
-      { label: "Critical gates", description: "List active and proposed protected paths.", run: async () => runCli(root, ["critical", "list"]) },
-      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", run: async () => runCli(root, ["sync"]) },
+      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", run: async (onOutput) => runCli(root, ["quality"], onOutput) },
+      { label: "Critical gates", description: "List active and AI-proposed protected paths.", run: async (onOutput) => runCli(root, ["critical", "list"], onOutput) },
+      { label: "Activate AI-proposed gate", description: "Protect a recognized core path and require pre-edit confirmation.", run: async (onOutput) => {
+        const glob = await chooseGate(root, "proposed", "activate");
+        if (glob) await runCli(root, ["critical", "activate", glob], onOutput);
+      } },
+      { label: "Remove critical gate", description: "Remove protection from an active core path after confirmation.", run: async (onOutput) => {
+        const glob = await chooseGate(root, "active", "remove");
+        if (glob) await runCli(root, ["critical", "remove", glob], onOutput);
+      } },
+      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", run: async (onOutput) => runCli(root, ["sync"], onOutput) },
       { label: "Delete harness state", description: "Remove .harnessme after confirmation.", run: async () => { if (await confirmRemoval()) await removeHarnessState(root); } },
       { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
     ] : [
-      { label: "Initialize", description: "Analyze this repository and create its harness.", run: async () => {
+      { label: "Initialize", description: "Analyze this repository and create its harness.", run: async (onOutput) => {
         const choice = await chooseInference();
         if (!choice) return;
         const args = choice.deterministic
           ? ["init", "--deterministic"]
           : ["init", "--provider", choice.provider ?? "auto", ...(choice.model ? ["--model", choice.model] : [])];
-        await runCli(root, args);
+        await runCli(root, args, onOutput);
       } },
       { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
     ];
     const selected = await dashboardSelection(root, actions);
     if (!selected) break;
-    try {
-      await selected.run();
-      if (running && selected.label !== "Delete harness state") await showMessage("Operation complete", "The dashboard state will now be refreshed.");
-    } catch (error) {
-      await showMessage("Operation failed", error instanceof Error ? error.message : String(error));
-    }
+    if (running && selected.label !== "Exit") await showOperation(selected.label, selected.run);
   }
 }

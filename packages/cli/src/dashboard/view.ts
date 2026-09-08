@@ -95,3 +95,32 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
   select.focus();
   return select;
 }
+
+export interface OperationScreen {
+  append: (chunk: string) => void;
+  finish: (message: string) => void;
+}
+
+export function buildOperationScreen(renderer: CliRenderer, title: string): OperationScreen {
+  const root = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%", backgroundColor: COLORS.background, padding: 1, gap: 1 });
+  renderer.root.add(root);
+  addText(renderer, root, title, { height: 1, fg: COLORS.accent });
+  addText(renderer, root, "HarnessME is running inside the dashboard. Live output appears below.", { height: 1, fg: COLORS.muted });
+  const outputBox = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Operation output ", padding: 1, overflow: "hidden" });
+  root.add(outputBox);
+  const output = addText(renderer, outputBox, "Starting…", { width: "100%", height: "100%", fg: COLORS.text, wrapMode: "char" });
+  const footer = addText(renderer, root, "Please wait…", { height: 1, fg: COLORS.muted });
+  const lines: string[] = [];
+  const append = (chunk: string): void => {
+    lines.push(...chunk.replace(/\r/g, "").split("\n"));
+    if (lines.length > 180) lines.splice(0, lines.length - 180);
+    output.content = lines.join("\n").trim() || "Starting…";
+    footer.content = "Operation running…";
+  };
+  return {
+    append,
+    finish(message: string): void {
+      footer.content = message;
+    },
+  };
+}

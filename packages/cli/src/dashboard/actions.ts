@@ -10,6 +10,8 @@ export interface InferenceChoice {
   model?: string;
 }
 
+export type OperationOutput = (chunk: string) => void;
+
 export async function resolveInferenceChoice(
   requested: "auto" | "codex" | "claude-code" | "cursor",
 ): Promise<{ provider: InferenceProviderId; models: Array<{ id: string; label: string }> }> {
@@ -46,11 +48,16 @@ export async function configureInference(root: string, choice: InferenceChoice):
   await writeYaml(join(harnessDir(root), "harnessme.yaml"), facts.config);
 }
 
-export async function runCli(root: string, args: string[]): Promise<void> {
+export async function runCli(root: string, args: string[], onOutput: OperationOutput = () => {}): Promise<void> {
   const entry = process.argv[1];
   if (!entry) throw new Error("Cannot locate the HarnessME executable.");
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry, ...args, "--root", root], { cwd: root, stdio: "inherit" });
+    onOutput(`$ harnessme ${args.join(" ")}\n\n`);
+    const child = spawn(process.execPath, [entry, ...args, "--root", root], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => onOutput(chunk));
+    child.stderr.on("data", (chunk: string) => onOutput(chunk));
     child.once("error", reject);
     child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`HarnessME command exited with code ${code ?? 1}.`)));
   });

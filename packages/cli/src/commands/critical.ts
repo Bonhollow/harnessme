@@ -97,6 +97,29 @@ const activate = defineCommand({
   },
 });
 
+const remove = defineCommand({
+  meta: { name: "remove", description: "Remove a critical path rule and regenerate governance files" },
+  args: {
+    glob: { type: "positional", description: "Exact registered critical path glob", required: true },
+    root: { type: "string", description: "Repository root", valueHint: "path" },
+  },
+  async run({ args }) {
+    const root = projectRoot(args.root);
+    const progress = createProgress(3);
+    progress.step("Loading the critical-path rule");
+    const config = await readCriticalPaths(root);
+    const glob = posixPath(args.glob);
+    const index = config.paths.findIndex((entry) => entry.glob === glob);
+    if (index < 0) throw new Error(`No critical path exists for: ${args.glob}`);
+    const [removed] = config.paths.splice(index, 1);
+    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
+    progress.step("Regenerating agent and governance integrations");
+    await syncHarness(root);
+    progress.done("Critical-path rule removed");
+    info(`Removed ${removed?.glob}; updated agent instructions, hooks, and CODEOWNERS.`);
+  },
+});
+
 const draft = defineCommand({
   meta: { name: "draft", description: "Create a review record before editing a critical path" },
   args: {
@@ -164,5 +187,5 @@ const approve = defineCommand({
 
 export default defineCommand({
   meta: { name: "critical", description: "Manage critical-path rules and review records" },
-  subCommands: { add, list, activate, draft, approve },
+  subCommands: { add, list, activate, remove, draft, approve },
 });

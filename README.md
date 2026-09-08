@@ -66,7 +66,7 @@ When run in a terminal without `--model`, HarnessME asks you to select a model a
 harnessme init --provider cursor --model your-model
 ```
 
-Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. Input selection prioritizes the root README, architecture/policy documents, manifests, and a balanced sample of core source from each module. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. Existing repository documentation is used through progressive disclosure: the root contract routes agents to task-relevant documents and states when those documents must change with the code instead of duplicating them. A separate inference pass compares and edits that document before HarnessME validates pre-edit guidance, actionable operating rules and workflows, concrete core boundaries, documentation routing, exact validation commands, safety language, managed placeholders, and chosen gate paths. Inventory-style output such as language percentages is rejected. If validation fails, HarnessME requests one focused correction; if the correction is still invalid, it visibly falls back to the safe deterministic renderer instead of leaving initialization incomplete.
+Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. Input selection prioritizes the root README, architecture/policy documents, manifests, and a balanced sample of core source from each module. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. Existing repository documentation is used through progressive disclosure: the root contract routes agents to task-relevant documents and states when those documents must change with the code instead of duplicating them. A separate inference pass compares and edits that document before HarnessME validates pre-edit guidance, actionable operating rules and workflows, concrete core boundaries, documentation routing, exact validation commands, safety language, managed placeholders, and chosen gate paths. Inventory-style output such as language percentages is rejected. AI mode never substitutes a deterministic document: it retries validation repairs up to three times and then fails clearly, leaving no newly rendered fallback harness. Use `--deterministic` only when local-only generation is explicitly intended.
 
 For a second opinion, assign a separate reviewer with `--review-provider`. The reviewer verifies proposed facts before storage, then receives the redacted validated evidence bundle, deterministic baseline, and draft for the final comparison. A different provider is recommended when available:
 
@@ -114,6 +114,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme critical add <glob>` | Register a risk-classified critical path. | `--reason <text>` and `--approvers <comma-list>` are required; `--risk security|persistence|public-contract|billing|deployment|shared-core|other` overrides automatic classification. |
 | `harnessme critical list` | List critical-path rules. | — |
 | `harnessme critical activate <glob>` | Activate a proposed critical path and regenerate governance files. | — |
+| `harnessme critical remove <glob>` | Remove an active or proposed critical-path rule and regenerate governance files. | — |
 | `harnessme critical draft <path>` | Start a review record before changing a critical file. | `--summary <text>` is required. |
 | `harnessme critical approve <record.md>` | Bind an approved record to staged content. | `--approver <handle>` is required. |
 | `harnessme critical-gate` | Run the critical-path gate (normally invoked by hooks/CI). | `--path <file>` for edit checks, `--base <git-revision>` for CI, or `--hook` for Claude Code hook input. |
@@ -156,6 +157,7 @@ In deterministic-only mode, heuristic paths begin as `proposed`. Review them fir
 ```bash
 harnessme critical list
 harnessme critical activate "src/core.ts"
+harnessme critical remove "src/core.ts"
 ```
 
 For registered paths, generated agent instructions require explicit developer confirmation before editing. Claude Code receives a native permission prompt; the Git hook and CI reject commits unless an approved record matches the exact staged/committed content and ships with the updated critical index. CODEOWNERS remains the authoritative team-review control on GitHub.

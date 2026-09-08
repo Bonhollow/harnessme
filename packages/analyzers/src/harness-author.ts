@@ -501,25 +501,35 @@ Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VE
     }
     if (!selected) throw lastError;
   } catch (error) {
-    const validationError = error instanceof Error ? error.message : String(error);
-    options.onPhase?.(`Repairing rejected AGENTS.md with ${reviewer.name}`);
-    const repairSystem = `${reviewSystem}
+    let validationError = error instanceof Error ? error.message : String(error);
+    let repairedResult: typeof final | undefined;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      options.onPhase?.(`Repairing rejected AGENTS.md with ${reviewer.name} (${attempt}/3)`);
+      const repairSystem = `${reviewSystem}
 
 Your previous final document failed HarnessME's local validation: ${validationError}
-Correct that exact defect while preserving all valid content and constraints. Return the complete corrected document and gates.`;
-    const repaired = ReviewSchema.parse(await reviewer.generate(
-      "harnessme_agents_repair",
-      reviewJsonSchema,
-      repairSystem,
-      JSON.stringify({ evidenceBundle, draft, failedReview: reviewed, validationError }),
-    ));
-    const references = repaired.references.map((reference) => normalizeReferenceScope(reference, options.analysis, options.facts));
-    validated = validateAuthoredMarkdown(repaired.markdown, repaired.gates, references, eligible, options.facts, options.analysis);
-    final = {
-      ...repaired,
-      references,
-      comparison: `${reviewed.comparison}\nRepair: ${repaired.comparison}`,
-    };
+Correct that exact defect while preserving all valid content and constraints. This is a strict acceptance test, not a suggestion: the Change workflows section must have at least two actionable bullets and at least one backticked repository-relative source path from the supplied evidence; every generated reference must include its required headings, ownership seam, invariant, multi-step workflow, and verified command. Return the complete corrected document and gates.`;
+      const repaired = ReviewSchema.parse(await reviewer.generate(
+        "harnessme_agents_repair",
+        reviewJsonSchema,
+        repairSystem,
+        JSON.stringify({ evidenceBundle, draft, failedReview: reviewed, validationError }),
+      ));
+      const references = repaired.references.map((reference) => normalizeReferenceScope(reference, options.analysis, options.facts));
+      try {
+        validated = validateAuthoredMarkdown(repaired.markdown, repaired.gates, references, eligible, options.facts, options.analysis);
+        repairedResult = {
+          ...repaired,
+          references,
+          comparison: `${reviewed.comparison}\nRepair ${attempt}: ${repaired.comparison}`,
+        };
+        break;
+      } catch (repairError) {
+        validationError = repairError instanceof Error ? repairError.message : String(repairError);
+      }
+    }
+    if (!repairedResult) throw new AuthoredHarnessValidationError(`AI-authored AGENTS.md was rejected after 3 repair attempts: ${validationError}`);
+    final = repairedResult;
   }
   const normalizedGates = final.gates.map((gate) => ({
     ...gate,

@@ -169,12 +169,13 @@ function cursorRuntime(config: AiReviewConfig, command = "cursor-agent"): Infere
       try {
         const inputPath = join(directory, "input.txt");
         await writeFile(inputPath, `${prompt(system, input)}\n\nOUTPUT JSON SCHEMA\n${JSON.stringify(schema)}`, "utf8");
-        const args = ["--print", "--mode", "ask", "--output-format", "text", "--trust", "--workspace", directory];
+        const args = ["--print", "--mode", "ask", "--output-format", "json", "--trust", "--workspace", directory];
         if (config.model) args.push("--model", config.model);
         args.push("Read input.txt and return only JSON matching its OUTPUT JSON SCHEMA. Do not modify files or run commands.");
         const result = await run(command, args, directory);
         if (result.code !== 0) throw new Error(`Cursor inference failed: ${result.stderr.trim().slice(-500)}`);
-        return parseJsonText(result.stdout);
+        const payload = parseJsonText(result.stdout) as { result?: string; structured_output?: unknown };
+        return payload.structured_output ?? (typeof payload.result === "string" ? parseJsonText(payload.result) : payload);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }

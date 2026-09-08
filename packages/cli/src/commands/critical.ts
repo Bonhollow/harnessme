@@ -29,7 +29,7 @@ function safeProjectRelative(root: string, value: string): string {
   return path;
 }
 
-const add = defineCommand({
+export const add = defineCommand({
   meta: { name: "add", description: "Register a critical path glob" },
   args: {
     glob: { type: "positional", description: "Repository-relative glob", required: true },
@@ -64,7 +64,7 @@ const add = defineCommand({
   },
 });
 
-const list = defineCommand({
+export const list = defineCommand({
   meta: { name: "list", description: "List critical path rules" },
   args: { root: { type: "string", description: "Repository root", valueHint: "path" } },
   async run({ args }) {
@@ -74,7 +74,7 @@ const list = defineCommand({
   },
 });
 
-const activate = defineCommand({
+export const activate = defineCommand({
   meta: { name: "activate", description: "Activate a proposed critical path after maintainer review" },
   args: {
     glob: { type: "positional", description: "Exact registered critical path glob", required: true },
@@ -97,7 +97,7 @@ const activate = defineCommand({
   },
 });
 
-const remove = defineCommand({
+export const remove = defineCommand({
   meta: { name: "remove", description: "Remove a critical path rule and regenerate governance files" },
   args: {
     glob: { type: "positional", description: "Exact registered critical path glob", required: true },
@@ -120,7 +120,7 @@ const remove = defineCommand({
   },
 });
 
-const draft = defineCommand({
+export const draft = defineCommand({
   meta: { name: "draft", description: "Create a review record before editing a critical path" },
   args: {
     path: { type: "positional", description: "Repository-relative file path", required: true },
@@ -145,7 +145,7 @@ const draft = defineCommand({
   },
 });
 
-const approve = defineCommand({
+export const approve = defineCommand({
   meta: { name: "approve", description: "Bind a reviewed critical record to staged file content" },
   args: {
     record: { type: "positional", description: "Critical-log filename", required: true },

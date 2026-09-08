@@ -5,7 +5,12 @@ import {
   type SelectOption,
 } from "@opentui/core";
 import { readFacts } from "@harnessme/core";
-import { configureInference, removeHarnessState, resolveInferenceChoice, runCli, type InferenceChoice, type OperationOutput } from "./actions.js";
+import initCommand from "../commands/init.js";
+import refreshCommand from "../commands/refresh.js";
+import qualityCommand from "../commands/quality.js";
+import syncCommand from "../commands/sync.js";
+import { activate as activateCriticalCommand, list as listCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
+import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
 import { loadDashboardState } from "./state.js";
 import { buildDashboard, buildOperationScreen, buildSelectionScreen } from "./view.js";
 
@@ -135,35 +140,41 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
-      { label: "Refresh with AI", description: "Use the configured provider and model.", run: async (onOutput) => runCli(root, ["refresh"], onOutput) },
-      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", run: async (onOutput) => runCli(root, ["refresh", "--deterministic"], onOutput) },
+      { label: "Refresh with AI", description: "Use the configured provider and model.", run: async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false }, onOutput) },
+      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", run: async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: true }, onOutput) },
       { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", run: async (onOutput) => {
         const choice = await chooseInference();
         if (!choice) return;
         await configureInference(root, choice);
-        await runCli(root, choice.deterministic ? ["refresh", "--deterministic"] : ["refresh"], onOutput);
+        await runDashboardCommand(root, refreshCommand, { deterministic: choice.deterministic }, onOutput);
       } },
-      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", run: async (onOutput) => runCli(root, ["quality"], onOutput) },
-      { label: "Critical gates", description: "List active and AI-proposed protected paths.", run: async (onOutput) => runCli(root, ["critical", "list"], onOutput) },
+      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", run: async (onOutput) => runDashboardCommand(root, qualityCommand, {}, onOutput) },
+      { label: "Critical gates", description: "List active and AI-proposed protected paths.", run: async (onOutput) => runDashboardCommand(root, listCriticalCommand, {}, onOutput) },
       { label: "Activate AI-proposed gate", description: "Protect a recognized core path and require pre-edit confirmation.", run: async (onOutput) => {
         const glob = await chooseGate(root, "proposed", "activate");
-        if (glob) await runCli(root, ["critical", "activate", glob], onOutput);
+        if (glob) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
       } },
       { label: "Remove critical gate", description: "Remove protection from an active core path after confirmation.", run: async (onOutput) => {
         const glob = await chooseGate(root, "active", "remove");
-        if (glob) await runCli(root, ["critical", "remove", glob], onOutput);
+        if (glob) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
       } },
-      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", run: async (onOutput) => runCli(root, ["sync"], onOutput) },
+      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", run: async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
       { label: "Delete harness state", description: "Remove .harnessme after confirmation.", run: async () => { if (await confirmRemoval()) await removeHarnessState(root); } },
       { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
     ] : [
       { label: "Initialize", description: "Analyze this repository and create its harness.", run: async (onOutput) => {
         const choice = await chooseInference();
         if (!choice) return;
-        const args = choice.deterministic
-          ? ["init", "--deterministic"]
-          : ["init", "--provider", choice.provider ?? "auto", ...(choice.model ? ["--model", choice.model] : [])];
-        await runCli(root, args, onOutput);
+        await runDashboardCommand(root, initCommand, {
+          provider: choice.provider ?? "auto",
+          deterministic: choice.deterministic,
+          model: choice.model,
+          councilSize: "2",
+          aiApiKeyEnv: "",
+          aiInclude: "**/*",
+          reviewAiApiKeyEnv: "",
+          criticalApprovers: "developer",
+        }, onOutput);
       } },
       { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
     ];

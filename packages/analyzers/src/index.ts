@@ -13,3 +13,4 @@ export {
   authorHarnessWithAi,
   type AuthoredHarnessResult,
 } from "./harness-author.js";
+export * from "./documentation.js";

@@ -3,11 +3,14 @@ import { join } from "node:path";
 import { defineCommand } from "citty";
 import {
   atomicWrite,
+  assessHarnessQuality,
+  classifyRisk,
   defaultConfig,
   defaultCriticalPaths,
   defaultVerifiedChanges,
   exists,
   harnessDir,
+  readFacts,
   readText,
   writeJson,
   writeFacts,
@@ -25,7 +28,7 @@ import {
   resolveInferenceProvider,
   type InferenceProviderId,
 } from "@harnessme/analyzers";
-import { GENERATED_MARKER, providers, renderAgentsMd, resolveProviders, syncHarness } from "@harnessme/renderers";
+import { GENERATED_MARKER, providers, referenceDocuments, renderAgentsMd, resolveProviders, syncHarness } from "@harnessme/renderers";
 import { createProgress, disabled, enabled, info, warn } from "../output.js";
 import { projectRoot, providerValues } from "../project.js";
 import { selectModel } from "../selection.js";
@@ -80,7 +83,7 @@ export default defineCommand({
     const root = projectRoot(args.root);
     const base = harnessDir(root);
     if (await exists(base)) {
-      throw new Error(`HarnessME is already initialized at ${root}. Use \`harnessme scan\` or \`harnessme sync\`.`);
+      throw new Error(`HarnessME is already initialized at ${root}. Use \`harnessme refresh\` to reanalyze it or \`harnessme sync\` to rerender stored facts.`);
     }
     const selected = resolveProviders(providerValues(args.targets) ?? providers.map((provider) => provider.id));
     const config = defaultConfig(selected.map((provider) => provider.id));
@@ -110,7 +113,7 @@ export default defineCommand({
           endpoint,
           model,
           apiKeyEnv: provisional.apiKeyEnv,
-          maxFiles: 20,
+          maxFiles: 40,
           maxFileBytes: 65_536,
           include: String(args.aiInclude).split(",").map((item) => item.trim()).filter(Boolean),
           exclude: typeof args.aiExclude === "string" ? args.aiExclude.split(",").map((item) => item.trim()).filter(Boolean) : [],
@@ -203,7 +206,7 @@ export default defineCommand({
     await atomicWrite(join(base, "facts", "directives.md"), directives);
     await atomicWrite(
       join(base, "CRITICAL.md"),
-      "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`.\n\n| Date | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|\n",
+      "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`.\n\n| Date | Risk | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|---|\n",
     );
 
     progress.step("Analyzing source, configuration, dependencies, and history");
@@ -224,6 +227,7 @@ export default defineCommand({
           approvers,
           source: "heuristic",
           status: "proposed",
+          risk: classifyRisk(candidate.path),
         });
       }
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
@@ -240,6 +244,7 @@ export default defineCommand({
         directives,
         criticalPaths,
         changes: initialChanges,
+        documentationConflicts: analysis.documentationConflicts,
       };
       try {
         const authored = await authorHarnessWithAi({
@@ -256,6 +261,7 @@ export default defineCommand({
             existing.reason = gate.reason;
             existing.source = "ai-reviewed";
             existing.status = "active";
+            existing.risk = gate.risk;
           } else {
             criticalPaths.paths.push({
               glob: gate.path,
@@ -263,11 +269,17 @@ export default defineCommand({
               approvers,
               source: "ai-reviewed",
               status: "active",
+              risk: gate.risk,
             });
           }
         }
         await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
         await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
+        await writeJson(join(base, "facts", "references.json"), {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          documents: authored.references,
+        });
         await writeJson(join(base, "facts", "harness-generation.json"), {
           status: "ai-reviewed",
           generatedAt: new Date().toISOString(),
@@ -276,6 +288,7 @@ export default defineCommand({
           reviewerProvider: authored.reviewerRuntime,
           reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
           comparison: authored.comparison,
+          passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
           activatedGates: authored.gates,
         });
       } catch (error) {
@@ -295,6 +308,17 @@ export default defineCommand({
     } else {
       progress.step("Rendering the deterministic instruction baseline");
     }
+    let qualityFacts = await readFacts(root);
+    if (!qualityFacts.referencePack) {
+      await writeJson(join(base, "facts", "references.json"), {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        documents: referenceDocuments(qualityFacts),
+      });
+      qualityFacts = await readFacts(root);
+    }
+    const quality = assessHarnessQuality(qualityFacts, analysis.documentationConflicts ?? [], renderAgentsMd(qualityFacts));
+    await writeJson(join(base, "facts", "quality.json"), quality);
     progress.step("Generating instructions and governance integrations");
     const result = await syncHarness(root);
     progress.done("Harness created");
@@ -303,6 +327,7 @@ export default defineCommand({
     const activeCount = criticalPaths.paths.filter((entry) => entry.status === "active").length;
     const proposedCount = criticalPaths.paths.filter((entry) => entry.status === "proposed").length;
     info(`Critical paths: ${activeCount} active, ${proposedCount} proposed. Review .harnessme/critical-paths.yaml, then run \`harnessme hooks install\`.`);
+    info(`Harness quality: ${quality.score}/100. Run \`harnessme quality\` for details.`);
     info(`Generated ${result.files.join(", ")}.`);
   },
 });

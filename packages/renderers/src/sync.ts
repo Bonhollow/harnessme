@@ -1,4 +1,4 @@
-import { mkdir, unlink } from "node:fs/promises";
+import { mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
   atomicWrite,
@@ -11,6 +11,7 @@ import { GENERATED_MARKER, extractPending, renderAgentsMd } from "./agents-md.js
 import { resolveProviders } from "./providers.js";
 import { applyRuler } from "./ruler.js";
 import { renderGovernance } from "./governance.js";
+import { referenceDocuments } from "./reference-pack.js";
 
 export interface SyncResult {
   files: string[];
@@ -51,6 +52,20 @@ export async function syncHarness(root: string, targetIds?: string[]): Promise<S
   }
   await atomicWrite(agentsPath, content);
   const files = ["AGENTS.md", ".ruler/AGENTS.md", ".ruler/ruler.toml"];
+  const referencesDir = join(root, ".harnessme", "references");
+  await mkdir(referencesDir, { recursive: true });
+  const references = referenceDocuments(facts);
+  const expectedReferences = new Set(references.map((reference) => `${reference.slug}.md`));
+  for (const entry of await readdir(referencesDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md") || expectedReferences.has(entry.name)) continue;
+    const path = join(referencesDir, entry.name);
+    if ((await readText(path)).startsWith(GENERATED_MARKER)) await unlink(path);
+  }
+  for (const reference of references) {
+    const relativePath = `.harnessme/references/${reference.slug}.md`;
+    await atomicWrite(join(root, relativePath), `${GENERATED_MARKER}\n${reference.markdown.trim()}\n`);
+    files.push(relativePath);
+  }
 
   if (selected.some((provider) => provider.id === "claude-code")) {
     await atomicWrite(

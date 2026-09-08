@@ -1,6 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { redactUntrustedSource } from "../packages/analyzers/src/ai-fallback.js";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { analyzeWithAiFallback, previewAiInputs, redactUntrustedSource } from "../packages/analyzers/src/ai-fallback.js";
 import { CriticalPathsSchema } from "../packages/core/src/schema.js";
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 describe("security evaluations", () => {
   it.each([
@@ -38,5 +48,78 @@ describe("security evaluations", () => {
       paths: [{ ...legacy.paths[0], status: "proposed" }],
     });
     expect(proposed.paths[0]?.status).toBe("proposed");
+  });
+
+  it("prioritizes operating documentation and manifests for model analysis", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-input-priority-"));
+    roots.push(root);
+    await mkdir(join(root, "docs"));
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "README.md"), "# Fixture\n\nA service for scoring conversations.\n");
+    await writeFile(join(root, "docs", "INVARIANTS.md"), "# Invariants\n\nCompleted runs are immutable.\n");
+    await writeFile(join(root, "pyproject.toml"), "[project]\nname = \"fixture\"\n");
+    for (let index = 0; index < 25; index += 1) {
+      await writeFile(join(root, "src", `component-${index}.ts`), `export const value${index} = ${index};\n`);
+    }
+
+    const preview = await previewAiInputs(root, [], {
+      enabled: true,
+      provider: "http",
+      frameworks: [],
+      endpoint: "http://127.0.0.1:1/v1/chat/completions",
+      model: "unused",
+      apiKeyEnv: "",
+      maxFiles: 5,
+      maxFileBytes: 65_536,
+      include: ["**/*"],
+      exclude: [],
+    });
+
+    expect(preview.map((item) => item.path)).toEqual(expect.arrayContaining(["README.md", "docs/INVARIANTS.md", "pyproject.toml"]));
+  });
+
+  it("retains only independently verified two-sided documentation conflicts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-ai-conflict-"));
+    roots.push(root);
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "README.md"), "The service always returns XML.\n");
+    await writeFile(join(root, "src", "core.ts"), "export const responseFormat = \"json\";\n");
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.once("end", () => {
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const content = payload.response_format?.json_schema?.name === "harnessme_facts"
+          ? { facts: [], conflicts: [{ id: "format-conflict", claim: "README says XML but implementation selects JSON.", documentPath: "README.md", documentLine: 1, documentExcerpt: "The service always returns XML.", implementationPath: "src/core.ts", implementationLine: 1, implementationExcerpt: "export const responseFormat = \"json\";" }] }
+          : { approvedIds: ["format-conflict"] };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Conflict test server has no port.");
+      const result = await analyzeWithAiFallback(root, [], new Set([".ts"]), {
+        enabled: true,
+        provider: "http",
+        frameworks: [],
+        endpoint: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+        model: "test-model",
+        apiKeyEnv: "",
+        maxFiles: 10,
+        maxFileBytes: 65_536,
+        include: ["**/*"],
+        exclude: [],
+      });
+      expect(result.conflicts).toEqual([expect.objectContaining({
+        kind: "contradiction",
+        document: "README.md",
+        implementationPath: "src/core.ts",
+      })]);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });

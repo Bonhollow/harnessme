@@ -9,24 +9,54 @@ import { describe, expect, it } from "vitest";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 
-function authoredHarness(stack: string, details = "Follow the validated repository evidence."): string {
+function authoredHarness(stack: string, details = "Follow the validated repository evidence.", corePath = "src/core.ts"): string {
   return `# Repository instructions
 
 ## Stack
 
 ${stack}
 
+## Before editing
+
+Before editing, inspect the owning module, its callers, and nearby tests.
+
+## Reference map
+
+No scoped reference is needed for this fixture.
+
 ## Architecture
 
-${details}
+${details} The \`${corePath}\` file is the fixture's owning seam.
 
 ## Coding conventions
 
 ${details}
 
+## Operating rules
+
+- Keep changes within the owning module and preserve documented boundaries.
+- Run the validated repository checks before considering work complete.
+
+## Known documentation conflicts
+
+No documentation conflicts were detected.
+
+## Core boundaries
+
+- \`${corePath}\` represents the fixture's core boundary when present.
+
+## Change workflows
+
+- Edit behavior through \`${corePath}\` and update affected consumers.
+- Update nearby tests and run the validated checks after changing behavior.
+
 ## Validation
 
 Run the repository's validated checks after making changes.
+
+## Documentation maintenance
+
+Update repository documentation when public behavior changes.
 
 ## Critical-path safety gate
 
@@ -63,6 +93,33 @@ async function execWithInput(command: string, args: string[], input: string): Pr
 }
 
 describe("CLI", () => {
+  it("refreshes scoped guidance while preserving maintainer-owned pending notes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-refresh-"));
+    await mkdir(join(root, "src"));
+    await mkdir(join(root, "docs"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "refresh-fixture", scripts: { test: "node --test" } }));
+    await writeFile(join(root, "README.md"), "A service for refresh verification.\n");
+    await writeFile(join(root, "docs", "CORE.md"), "The core lives at `src/core.ts`.\n");
+    await writeFile(join(root, "src", "core.ts"), "export const core = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const initial = await readFile(join(root, "AGENTS.md"), "utf8");
+    await writeFile(join(root, "AGENTS.md"), initial.replace("<!-- HARNESSME:PENDING:END -->", "- 2026-09-08: preserve this maintainer note\n<!-- HARNESSME:PENDING:END -->"));
+    await writeFile(join(root, "docs", "CORE.md"), "The core lives at `src/core.ts`; the old adapter was `src/missing.ts`.\n");
+
+    const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    expect(refreshed.stdout).toContain("Refreshed 7 managed artifact(s)");
+    expect(agents).toContain("preserve this maintainer note");
+    expect(agents).toContain(".harnessme/references/repository-workflow.md");
+    expect(await readFile(join(root, ".harnessme", "references", "repository-workflow.md"), "utf8")).toContain("## Invariants");
+    expect(JSON.parse(await readFile(join(root, ".harnessme", "facts", "conflicts.json"), "utf8"))).toEqual([
+      expect.objectContaining({ document: "docs/CORE.md", reference: "src/missing.ts" }),
+    ]);
+    const quality = await exec(process.execPath, [cli, "quality", "--root", root]);
+    expect(quality.stdout).toContain("Harness quality:");
+    expect(quality.stdout).toContain("documentation/code conflict");
+  }, 30_000);
+
   it("falls back to deterministic analysis when auto finds no inference CLI", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-auto-fallback-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "auto-fallback-fixture" }));
@@ -73,7 +130,7 @@ describe("CLI", () => {
     expect(initialized.stdout).toContain("Initialized HarnessME");
     expect(initialized.stdout).toContain("✗ AI-assisted mode unavailable");
     expect(initialized.stdout).toContain("✓ Deterministic repository analysis");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("TypeScript (100%)");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Operating rules");
   }, 30_000);
 
   it("merges the gate into an empty or comment-only Lefthook configuration", async () => {
@@ -131,8 +188,8 @@ const value = schema.includes("harnessme_facts")
     : schema.includes("harnessme_verification")
       ? { approvedIds: ["lang-kotlin"] }
       : schema.includes("harnessme_agents_draft")
-        ? { markdown: ${JSON.stringify(authoredHarness("Kotlin (100%)"))}, gates: [] }
-        : { markdown: ${JSON.stringify(authoredHarness("Kotlin (100%)"))}, gates: [], comparison: "Retained the verified Kotlin stack and safety requirements." };
+        ? { markdown: ${JSON.stringify(authoredHarness("Kotlin runtime and tooling.", undefined, "App.kt"))}, gates: [] }
+        : { markdown: ${JSON.stringify(authoredHarness("Kotlin runtime and tooling.", undefined, "App.kt"))}, gates: [], comparison: "Retained the verified Kotlin stack and safety requirements." };
   fs.writeFileSync(output, JSON.stringify(value));
 });
 `);
@@ -144,7 +201,7 @@ const value = schema.includes("harnessme_facts")
     });
     expect(initialized.stdout).toContain("✓ AI-assisted mode: codex / provider default");
     expect(initialized.stdout).toContain("✓ AI comparison review: separate pass");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Kotlin (100%)");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Kotlin runtime and tooling");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     expect(await readFile(join(root, ".clinerules"), "utf8")).toContain("Repository instructions");
     expect(await readFile(join(root, ".agent", "rules", "ruler.md"), "utf8")).toContain("Repository instructions");
@@ -155,6 +212,15 @@ const value = schema.includes("harnessme_facts")
     expect(configuration).toContain("- cursor");
     expect(configuration).toContain("provider: codex");
     expect(await readFile(join(root, ".harnessme", "facts", "harness-generation.json"), "utf8")).toContain("authorProvider");
+    const authoredBeforeFailedRefresh = await readFile(join(root, ".harnessme", "facts", "AGENTS.authored.md"), "utf8");
+    const stackBeforeFailedRefresh = await readFile(join(root, ".harnessme", "facts", "stack.yaml"), "utf8");
+    await writeFile(fakeCodex, "#!/usr/bin/env node\nprocess.exit(2);\n");
+    await writeFile(join(root, "App.kt"), "class ChangedApplication\n");
+    await expect(exec(process.execPath, [cli, "refresh", "--root", root], {
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` },
+    })).rejects.toThrow();
+    expect(await readFile(join(root, ".harnessme", "facts", "AGENTS.authored.md"), "utf8")).toBe(authoredBeforeFailedRefresh);
+    expect(await readFile(join(root, ".harnessme", "facts", "stack.yaml"), "utf8")).toBe(stackBeforeFailedRefresh);
   }, 30_000);
 
   it("previews model inputs without writing and honors all privacy exclusions", async () => {
@@ -199,8 +265,8 @@ const value = schema.includes("harnessme_facts")
           : schema === "harnessme_verification"
             ? JSON.stringify({ approvedIds: ["language-swift", "pascal-types", "payment-boundary"] })
             : schema === "harnessme_agents_draft"
-              ? JSON.stringify({ markdown: authoredHarness("Swift (100%)", "Use PascalCase names for declared types. PaymentService is a payment-domain boundary."), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }] })
-              : JSON.stringify({ markdown: authoredHarness("Swift (100%)", "Use PascalCase names for declared types. Evidence: `Payment.swift:1`. PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`."), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }], comparison: "Kept evidence-backed facts and narrowed the gate to the payment boundary." });
+              ? JSON.stringify({ markdown: authoredHarness("Swift runtime and tooling.", "Use PascalCase names for declared types. PaymentService is a payment-domain boundary.", "Payment.swift"), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }] })
+              : JSON.stringify({ markdown: authoredHarness("Swift runtime and tooling.", "Use PascalCase names for declared types. Evidence: `Payment.swift:1`. PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`.", "Payment.swift"), gates: [{ path: "Payment.swift", reason: "Payment boundary changes can affect money movement." }], comparison: "Kept evidence-backed facts and narrowed the gate to the payment boundary." });
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -217,7 +283,7 @@ const value = schema.includes("harnessme_facts")
         "--ai-endpoint", `http://127.0.0.1:${address.port}/v1/chat/completions`, "--model", "test-model",
       ]);
       const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-      expect(agents).toContain("Swift (100%)");
+      expect(agents).toContain("Swift runtime and tooling");
       expect(agents).toContain("Use PascalCase names for declared types. Evidence: `Payment.swift:1`");
       expect(agents).toContain("PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`");
       expect(requests).toBe(4);
@@ -249,8 +315,8 @@ const value = schema.includes("harnessme_facts")
           : schema === "harnessme_verification"
             ? JSON.stringify({ approvedIds: [] })
             : schema === "harnessme_agents_draft"
-              ? JSON.stringify({ markdown: authoredHarness("None detected"), gates: [] })
-              : JSON.stringify({ markdown: authoredHarness("None detected"), gates: [], comparison: "Removed the unapproved Swift claim." });
+              ? JSON.stringify({ markdown: authoredHarness("A fixture for independent model review.", undefined, "App.swift"), gates: [] })
+              : JSON.stringify({ markdown: authoredHarness("A fixture for independent model review.", undefined, "App.swift"), gates: [], comparison: "Removed the unapproved Swift claim." });
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -269,7 +335,7 @@ const value = schema.includes("harnessme_facts")
       ]);
       expect(models).toEqual(["analyst-model", "reviewer-model", "analyst-model", "reviewer-model"]);
       expect(initialized.stderr).toContain("independently reviewed by http");
-      expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Stack\n\nNone detected");
+      expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Project purpose\n\nA fixture for independent model review.");
       const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
       expect(configuration).toContain("reviewer-model");
     } finally {
@@ -316,8 +382,8 @@ const value = schema.includes("harnessme_facts")
     expect(initialized.stderr).toContain("progress: [===.................] 1/6 Preparing the HarnessME workspace");
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     expect(agents).toContain("Evidence: `.editorconfig:3`");
-    expect(agents).toContain("uses exceptions for error propagation");
-    expect(agents).toContain("C#");
+    expect(agents).toContain("Preserve the established exception propagation and handling pattern");
+    expect(agents).not.toContain("language percentage");
     expect(initialized.stderr).not.toContain("Could not parse");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     const claudeSettings = await readFile(join(root, ".claude", "settings.json"), "utf8");

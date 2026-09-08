@@ -4,6 +4,7 @@ import { defineCommand } from "citty";
 import matter from "gray-matter";
 import {
   atomicWrite,
+  classifyRisk,
   harnessDir,
   matchingCriticalPath,
   posixPath,
@@ -34,6 +35,7 @@ const add = defineCommand({
     glob: { type: "positional", description: "Repository-relative glob", required: true },
     reason: { type: "string", description: "Why changes need review", required: true },
     approvers: { type: "string", description: "Comma-separated GitHub handles", required: true },
+    risk: { type: "string", description: "Risk category: security, persistence, public-contract, billing, deployment, shared-core, or other" },
     root: { type: "string", description: "Repository root", valueHint: "path" },
   },
   async run({ args }) {
@@ -46,7 +48,10 @@ const add = defineCommand({
     }
     const config = await readCriticalPaths(root);
     if (config.paths.some((entry) => entry.glob === glob)) throw new Error(`Critical path already exists: ${glob}`);
-    config.paths.push({ glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit", status: "active" });
+    const allowedRisks = ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] as const;
+    const risk = args.risk ?? classifyRisk(glob);
+    if (!allowedRisks.includes(risk as typeof allowedRisks[number])) throw new Error(`Unsupported risk category: ${risk}`);
+    config.paths.push({ glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit", status: "active", risk: risk as typeof allowedRisks[number] });
     config.paths.sort((a, b) => a.glob.localeCompare(b.glob));
     await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
     progress.step("Regenerating agent and governance integrations");
@@ -62,7 +67,7 @@ const list = defineCommand({
   async run({ args }) {
     const config = await readCriticalPaths(projectRoot(args.root));
     if (!config.paths.length) return info("No explicit critical paths configured.");
-    for (const entry of config.paths) info(`${entry.status}\t${entry.glob}\t${entry.reason}\t${entry.approvers.map((item) => `@${item}`).join(",")}`);
+    for (const entry of config.paths) info(`${entry.status}\t${entry.risk ?? "other"}\t${entry.glob}\t${entry.reason}\t${entry.approvers.map((item) => `@${item}`).join(",")}`);
   },
 });
 
@@ -107,7 +112,7 @@ const draft = defineCommand({
     const file = `${date}-${slug}-${suffix}.md`;
     const content = matter.stringify(
       `## Context\n\n[why this change is needed]\n\n## Decision\n\n[what changed, in plain language]\n\n## Impact\n\n[what else depends on this / could break]\n\n## Rollback\n\n[how to revert safely]\n`,
-      { status: "draft", path, approvers: rule.approvers, date, summary: args.summary, "change-id": "pending" },
+      { status: "draft", path, risk: rule.risk ?? classifyRisk(path), approvers: rule.approvers, date, summary: args.summary, "change-id": "pending" },
     );
     await atomicWrite(join(harnessDir(root), "critical-log", file), content);
     info(`Created .harnessme/critical-log/${file}. Review it, stage the code, then run \`harnessme critical approve ${file}\`.`);
@@ -143,7 +148,10 @@ const approve = defineCommand({
 
     const indexPath = join(harnessDir(root), "CRITICAL.md");
     const index = await readText(indexPath);
-    const row = `| ${document.data.date} | ${path} | ${String(document.data.summary).replaceAll("|", "\\|")} | @${approver} | ${document.data["change-id"]} |`;
+    const summary = String(document.data.summary).replaceAll("|", "\\|");
+    const row = index.includes("| Date | Risk |")
+      ? `| ${document.data.date} | ${rule.risk ?? classifyRisk(path)} | ${path} | ${summary} | @${approver} | ${document.data["change-id"]} |`
+      : `| ${document.data.date} | ${path} | ${summary} | @${approver} | ${document.data["change-id"]} |`;
     if (!index.includes(String(document.data["change-id"]))) {
       await atomicWrite(indexPath, `${index.trimEnd()}\n${row}\n`);
     }

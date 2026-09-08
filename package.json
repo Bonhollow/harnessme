@@ -1,6 +1,6 @@
 {
   "name": "harnessme",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Derive, distribute, and govern AI coding-agent instructions from the codebase itself.",
   "repository": {
     "type": "git",

@@ -7,3 +7,5 @@ export * from "./governance.js";
 export * from "./git.js";
 export * from "./governance-artifacts.js";
 export * from "./version.js";
+export * from "./quality.js";
+export * from "./risk.js";

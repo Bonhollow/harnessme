@@ -25,6 +25,9 @@ describe("AGENTS.md renderer", () => {
         frameworks: [],
         dependencies: [],
         topLevelModules: ["src"],
+        validationCommands: ["npm test"],
+        projectSummary: "A service for evaluating repository changes.",
+        documentationPaths: ["README.md", "docs/ARCHITECTURE.md"],
       },
       evidence: [{ id: "ev-1", path: ".editorconfig", line: 4, kind: "config", excerpt: "indent_style = space" }],
       architecture: "# Observed architecture\n\n## Top-level modules\n\n- `src/`\n",
@@ -34,6 +37,14 @@ describe("AGENTS.md renderer", () => {
     };
     const output = renderAgentsMd(facts, "- 2026-09-07: changed `src/a.ts`");
     expect(output).toContain("Use spaces. Evidence: `.editorconfig:4`");
+    expect(output).toContain("## Operating rules");
+    expect(output).toContain("## Core boundaries");
+    expect(output).toContain("## Change workflows");
+    expect(output).toContain("`docs/ARCHITECTURE.md`");
+    expect(output).toContain("A service for evaluating repository changes.");
+    expect(output).toContain("`npm test`");
+    expect(output).not.toContain("100%");
+    expect(output).not.toContain("Operational technologies");
     expect(output).toContain("Never commit credentials.");
     expect(output).toContain("HARNESSME:PENDING:START");
     expect(output).toContain("changed `src/a.ts`");
@@ -58,7 +69,7 @@ describe("AGENTS.md renderer", () => {
     };
     const output = renderAgentsMd(facts);
     expect(output).toContain("## AI-authored guidance");
-    expect(output).toContain("`src/core.ts`: Shared public contract");
+    expect(output).toContain("`src/core.ts` [other]: Shared public contract");
     expect(output).toContain("HARNESSME:PENDING:START");
     expect(output).not.toContain("{{HARNESSME_");
   });

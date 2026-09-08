@@ -17,15 +17,45 @@ function harnessMarkdown(includeArchitecture: boolean): string {
 
 ## Stack
 
-No languages or frameworks were detected.
+A repository fixture used to verify harness generation.
+
+## Before editing
+
+Before editing, inspect the owning code and nearby tests.
+
+## Reference map
+
+No scoped reference is needed for this empty fixture.
 
 ${includeArchitecture ? "## Architecture\n\nNo stable module boundaries were detected.\n\n" : ""}## Coding conventions
 
 Follow repository-local configuration.
 
+## Operating rules
+
+- Keep changes scoped to the owning module.
+- Run repository checks before considering work complete.
+
+## Known documentation conflicts
+
+No documentation conflicts were detected.
+
+## Core boundaries
+
+No concrete core boundary was detected in this empty fixture.
+
+## Change workflows
+
+- Edit behavior through the owning module and update its tests.
+- Trace affected callers and verify public contracts before changing them.
+
 ## Validation
 
 No validation command was detected.
+
+## Documentation maintenance
+
+Update repository documentation when public behavior changes.
 
 ## Critical-path safety gate
 
@@ -44,6 +74,85 @@ Before editing a listed path, stop and ask the developer for explicit confirmati
 ## Keeping this harness current
 
 {{HARNESSME_PENDING}}`;
+}
+
+function operationalHarnessMarkdown(): string {
+  return `# Repository instructions
+
+## Stack
+
+TypeScript runtime and tooling.
+
+## Before editing
+
+Before editing, inspect \`src/core.ts\`, its callers, nearby tests, and \`docs/CORE.md\`.
+
+## Reference map
+
+- [Core change guide](.harnessme/references/core.md): Read before changing the core service.
+
+## Architecture
+
+The \`src/\` module contains the application core.
+
+## Coding conventions
+
+Preserve the existing service boundary. Evidence: \`src/core.ts:1\`.
+
+## Operating rules
+
+- Keep changes inside the owning module unless a public contract requires coordinated edits. Evidence: \`src/core.ts:1\`.
+- Preserve the service boundary and update its consumers together.
+- Run the validated checks before considering work complete.
+
+## Known documentation conflicts
+
+No documentation conflicts were detected.
+
+## Core boundaries
+
+- \`src/core.ts\` owns the shared service contract. Ask before changing its public behavior.
+
+## Change workflows
+
+- Edit the service through \`src/core.ts\` and update its consumers together.
+- Update nearby tests and run the validated checks after behavior changes.
+
+## Validation
+
+Run \`npm test\` after changing behavior.
+
+## Documentation maintenance
+
+Update \`docs/CORE.md\` when the shared service contract changes.
+
+## Critical-path safety gate
+
+Before editing a listed path, stop and ask the developer for explicit confirmation. Never self-approve or bypass the gate.
+
+{{HARNESSME_CRITICAL_PATHS}}
+
+## Verified material changes
+
+{{HARNESSME_VERIFIED_CHANGES}}
+
+## Project directives
+
+{{HARNESSME_DIRECTIVES}}
+
+## Keeping this harness current
+
+{{HARNESSME_PENDING}}`;
+}
+
+function operationalReferences() {
+  return [{
+    slug: "core",
+    title: "Core change guide",
+    scope: "src/**",
+    description: "Read before changing the core service.",
+    markdown: "# Core change guide\n\n## Scope\n\n`src/**`\n\n## Responsibilities\n\n- Keep service behavior in `src/core.ts`. Evidence: `src/core.ts:1`.\n\n## Invariants\n\n- Preserve the public service contract.\n\n## Change workflow\n\n1. Update the service and its consumers together.\n2. Run the focused validation command.\n\n## Validation\n\nRun `npm test`.\n",
+  }];
 }
 
 describe("AI harness authoring", () => {
@@ -109,8 +218,83 @@ describe("AI harness authoring", () => {
       },
     });
 
-    expect(result.markdown).toContain("## Architecture");
+    expect(result.markdown).toContain("## Repository map");
     expect(result.comparison).toContain("Restored");
+    expect(requests).toBe(3);
+  });
+
+  it("rejects an inventory report and repairs it into operational instructions", async () => {
+    let requests = 0;
+    const inventory = harnessMarkdown(true)
+      .replace("A repository fixture used to verify harness generation.", "TypeScript (100%).")
+      .replace("No stable module boundaries were detected.", "The `src/` module contains `src/core.ts`.")
+      .replace("Follow repository-local configuration.", "Preserve the existing service boundary. Evidence: `src/core.ts:1`.")
+      .replace("No validation command was detected.", "Run `npm test`.");
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.once("end", () => {
+        requests += 1;
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const schema = payload.response_format?.json_schema?.name;
+        const result = schema === "harnessme_agents_repair"
+          ? { markdown: operationalHarnessMarkdown(), gates: [], references: operationalReferences(), comparison: "Replaced inventory with grounded operating instructions." }
+          : schema === "harnessme_agents_review"
+            ? { markdown: inventory, gates: [], comparison: "Retained the repository inventory." }
+            : { markdown: inventory, gates: [] };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(result) } }] }));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server did not expose a port.");
+
+    const facts: FactsSnapshot = {
+      config: { schemaVersion: 1, targets: ["codex"], languages: ["TypeScript"], analysis: { exclude: [], maxFileBytes: 1000 }, distribution: { backend: "native" } },
+      conventions: { schemaVersion: 1, generatedAt: new Date().toISOString(), facts: [{ id: "service-boundary", category: "oop", statement: "Preserve the existing service boundary.", confidence: 0.9, evidence: ["core-source"] }] },
+      stack: { schemaVersion: 1, generatedAt: new Date().toISOString(), languages: [{ name: "TypeScript", files: 1, percentage: 100 }], packageManagers: ["npm"], frameworks: [], dependencies: [], topLevelModules: ["src"], documentationPaths: ["docs/CORE.md"] },
+      evidence: [{ id: "core-source", path: "src/core.ts", line: 1, kind: "ast", excerpt: "export class CoreService" }],
+      architecture: "# Observed architecture\n\nThe src module contains the application core.\n",
+      directives: "# Project directives\n",
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+      changes: { schemaVersion: 1, changes: [] },
+    };
+    const analysis: AnalysisResult = {
+      conventions: facts.conventions,
+      stack: facts.stack,
+      evidence: facts.evidence,
+      architecture: facts.architecture,
+      hotspots: [],
+      warnings: [],
+      sourceFiles: ["src/core.ts"],
+      commands: ["npm test"],
+    };
+    const result = await authorHarnessWithAi({
+      facts,
+      analysis,
+      deterministicBaseline: inventory,
+      inference: {
+        enabled: true,
+        provider: "http",
+        frameworks: [],
+        endpoint: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+        model: "test-model",
+        apiKeyEnv: "",
+        maxFiles: 20,
+        maxFileBytes: 65_536,
+        include: ["**/*"],
+        exclude: [],
+      },
+    });
+
+    expect(result.markdown).toContain("## Operating rules");
+    expect(result.markdown).toContain("## Core boundaries");
+    expect(result.markdown).toContain("`docs/CORE.md`");
+    expect(result.references).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "core", scope: "src/**" })]));
+    expect(result.markdown).not.toContain("100%");
     expect(requests).toBe(3);
   });
 });

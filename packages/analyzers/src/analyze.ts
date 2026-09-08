@@ -15,6 +15,7 @@ import { addConvention, addEvidence, readable } from "./evidence.js";
 import { packageFacts } from "./packages.js";
 import { analyzeWithAiFallback } from "./ai-fallback.js";
 import { InferenceUnavailableError } from "./inference.js";
+import { analyzeDocumentation } from "./documentation.js";
 
 const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,ini,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
 const languageByExtension: Record<string, string> = {
@@ -132,6 +133,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   const importsByFile = new Map<string, string[]>();
   let inferredArchitecture: Array<{ statement: string; path: string; line: number }> = [];
   let aiInputs: AnalysisResult["aiInputs"];
+  let inferredConflicts: NonNullable<AnalysisResult["documentationConflicts"]> = [];
 
   for (const relativePath of files) {
     const absolutePath = join(root, relativePath);
@@ -194,6 +196,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
       for (const language of languagesByFile.values()) languageCounts.set(language, (languageCounts.get(language) ?? 0) + 1);
       files.push(...fallback.files.filter((path) => !files.includes(path)));
       inferredArchitecture = fallback.architecture;
+      inferredConflicts = fallback.conflicts;
       aiInputs = fallback.inputs;
     } catch (error) {
       if (!(error instanceof InferenceUnavailableError) || options.aiFallback.provider !== "auto") throw error;
@@ -240,6 +243,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
 
   const packageData = await packageFacts(root, evidence);
   const modules = topLevelModules(files);
+  const documentation = await analyzeDocumentation(root, exclude);
   for (const module of modules) addEvidence(evidence, `${module}/`, 1, "structure", "Top-level module directory");
   const now = new Date().toISOString();
   const stack: Stack = {
@@ -250,6 +254,9 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     frameworks: packageData.frameworks,
     dependencies: packageData.dependencies,
     topLevelModules: modules,
+    validationCommands: packageData.commands,
+    projectSummary: packageData.projectSummary,
+    documentationPaths: documentation.paths,
   };
   const packageJson = await readable(join(root, "package.json"));
   const projectName = packageJson
@@ -282,5 +289,9 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     aiInputs,
     sourceFiles: [...new Set(files.map(posixPath))].sort(),
     commands: packageData.commands,
+    documentationConflicts: [...documentation.conflicts, ...inferredConflicts]
+      .filter((item, index, items) => items.findIndex((candidate) =>
+        candidate.document === item.document && candidate.line === item.line && candidate.reference === item.reference
+      ) === index),
   };
 }

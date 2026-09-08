@@ -52,6 +52,9 @@ export const StackSchema = z.object({
   frameworks: z.array(z.string()),
   dependencies: z.array(DependencySchema),
   topLevelModules: z.array(z.string()),
+  validationCommands: z.array(z.string()).optional(),
+  projectSummary: z.string().min(1).optional(),
+  documentationPaths: z.array(z.string()).optional(),
 });
 
 const InferenceConfigSchema = z.object({
@@ -71,7 +74,7 @@ const HarnessConfigObjectSchema = z.object({
     maxFileBytes: z.number().int().positive().default(524_288),
     aiFallback: InferenceConfigSchema.extend({
       enabled: z.boolean(),
-      maxFiles: z.number().int().positive().max(100).default(20),
+      maxFiles: z.number().int().positive().max(100).default(40),
       maxFileBytes: z.number().int().positive().max(262_144).default(65_536),
       include: z.array(z.string().min(1)).default(["**/*"]),
       exclude: z.array(z.string().min(1)).default([]),
@@ -95,6 +98,7 @@ export const CriticalPathSchema = z.object({
   approvers: z.array(z.string().min(1)).min(1),
   source: z.enum(["explicit", "heuristic", "ai-reviewed"]).default("explicit"),
   status: z.enum(["proposed", "active"]).default("active"),
+  risk: z.enum(["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"]).optional(),
 });
 
 export const CriticalPathsSchema = z.object({
@@ -131,6 +135,47 @@ export type AiReviewConfig = NonNullable<HarnessConfig["analysis"]["review"]>;
 export type CriticalPaths = z.infer<typeof CriticalPathsSchema>;
 export type VerifiedChange = z.infer<typeof VerifiedChangeSchema>;
 export type VerifiedChanges = z.infer<typeof VerifiedChangesSchema>;
+
+export const ReferenceDocumentSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  title: z.string().min(1).max(120),
+  scope: z.string().min(1).max(500),
+  description: z.string().min(1).max(300),
+  markdown: z.string().min(100).max(8_000),
+});
+
+export const ReferencePackSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime(),
+  documents: z.array(ReferenceDocumentSchema).max(20),
+});
+
+export const DocumentationConflictSchema = z.object({
+  kind: z.enum(["missing-path", "contradiction"]).default("missing-path"),
+  document: z.string().min(1),
+  line: z.number().int().positive(),
+  reference: z.string().min(1),
+  message: z.string().min(1),
+  implementationPath: z.string().min(1).optional(),
+  implementationLine: z.number().int().positive().optional(),
+});
+
+export const HarnessQualitySchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime(),
+  score: z.number().int().min(0).max(100),
+  checks: z.array(z.object({
+    id: z.string().min(1),
+    passed: z.boolean(),
+    points: z.number().int().nonnegative(),
+    message: z.string().min(1),
+  })),
+});
+
+export type ReferenceDocument = z.infer<typeof ReferenceDocumentSchema>;
+export type ReferencePack = z.infer<typeof ReferencePackSchema>;
+export type DocumentationConflict = z.infer<typeof DocumentationConflictSchema>;
+export type HarnessQuality = z.infer<typeof HarnessQualitySchema>;
 
 export const DEFAULT_EXCLUDES = [
   "**/.git/**",

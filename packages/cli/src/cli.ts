@@ -10,6 +10,8 @@ import critical from "./commands/critical.js";
 import criticalGate from "./commands/critical-gate.js";
 import hooks from "./commands/hooks.js";
 import targets from "./commands/targets.js";
+import quality from "./commands/quality.js";
+import refresh from "./commands/refresh.js";
 import { HARNESSME_VERSION } from "@harnessme/core";
 
 const main = defineCommand({
@@ -30,6 +32,8 @@ const main = defineCommand({
     critical,
     "critical-gate": criticalGate,
     hooks,
+    quality,
+    refresh,
   },
 });
 

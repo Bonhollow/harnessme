@@ -3,15 +3,21 @@ import { z } from "zod";
 import {
   ConventionsSchema,
   CriticalPathsSchema,
+  DocumentationConflictSchema,
   EvidenceSchema,
   HarnessConfigSchema,
+  HarnessQualitySchema,
+  ReferencePackSchema,
   StackSchema,
   VerifiedChangesSchema,
   defaultVerifiedChanges,
   type Conventions,
   type CriticalPaths,
+  type DocumentationConflict,
   type Evidence,
   type HarnessConfig,
+  type HarnessQuality,
+  type ReferencePack,
   type Stack,
   type VerifiedChanges,
 } from "./schema.js";
@@ -27,6 +33,9 @@ export interface FactsSnapshot {
   criticalPaths: CriticalPaths;
   changes: VerifiedChanges;
   authoredInstructions?: string;
+  referencePack?: ReferencePack;
+  quality?: HarnessQuality;
+  documentationConflicts?: DocumentationConflict[];
 }
 
 export const harnessDir = (root: string): string => join(root, ".harnessme");
@@ -35,6 +44,7 @@ export async function writeFacts(
   root: string,
   data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture"> & {
     aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
+    documentationConflicts?: DocumentationConflict[];
   },
 ): Promise<void> {
   const facts = join(harnessDir(root), "facts");
@@ -50,6 +60,7 @@ export async function writeFacts(
       generatedAt: new Date().toISOString(),
       files: data.aiInputs,
     })] : []),
+    ...(data.documentationConflicts ? [writeJson(join(facts, "conflicts.json"), data.documentationConflicts)] : []),
   ]);
 }
 
@@ -58,6 +69,9 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
   const facts = join(base, "facts");
   const changesPath = join(facts, "changes.yaml");
   const authoredPath = join(facts, "AGENTS.authored.md");
+  const referencesPath = join(facts, "references.json");
+  const qualityPath = join(facts, "quality.json");
+  const conflictsPath = join(facts, "conflicts.json");
   const snapshot = {
     config: await readYaml(join(base, "harnessme.yaml"), HarnessConfigSchema),
     conventions: await readYaml(join(facts, "conventions.yaml"), ConventionsSchema),
@@ -70,6 +84,9 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
       ? await readYaml(changesPath, VerifiedChangesSchema)
       : defaultVerifiedChanges(),
     authoredInstructions: await exists(authoredPath) ? await readText(authoredPath) : undefined,
+    referencePack: await exists(referencesPath) ? await readJson(referencesPath, ReferencePackSchema) : undefined,
+    quality: await exists(qualityPath) ? await readJson(qualityPath, HarnessQualitySchema) : undefined,
+    documentationConflicts: await exists(conflictsPath) ? await readJson(conflictsPath, z.array(DocumentationConflictSchema)) : undefined,
   };
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const fact of snapshot.conventions.facts) {

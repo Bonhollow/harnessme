@@ -15,6 +15,24 @@ function setDifference(left: string[], right: string[]): string[] {
 
 export function detectDrift(current: AnalysisResult, committed: FactsSnapshot): DriftItem[] {
   const drift: DriftItem[] = [];
+  const committedConflicts = new Set((committed.documentationConflicts ?? []).map((item) => `${item.document}:${item.line}:${item.reference}`));
+  const currentConflicts = new Set((current.documentationConflicts ?? []).map((item) => `${item.document}:${item.line}:${item.reference}`));
+  for (const conflict of current.documentationConflicts ?? []) {
+    if (committedConflicts.has(`${conflict.document}:${conflict.line}:${conflict.reference}`)) continue;
+    drift.push({
+      severity: "warning",
+      category: "documentation",
+      message: `${conflict.document}:${conflict.line} references missing repository path ${conflict.reference}`,
+    });
+  }
+  for (const conflict of committed.documentationConflicts ?? []) {
+    if (currentConflicts.has(`${conflict.document}:${conflict.line}:${conflict.reference}`)) continue;
+    drift.push({
+      severity: "warning",
+      category: "documentation",
+      message: `Recorded documentation conflict was resolved or moved: ${conflict.document}:${conflict.line} (${conflict.reference})`,
+    });
+  }
   const oldLanguages = committed.stack.languages.map((item) => item.name);
   const newLanguages = current.stack.languages.map((item) => item.name);
   for (const language of setDifference(newLanguages, oldLanguages)) {

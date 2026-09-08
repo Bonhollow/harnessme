@@ -29,7 +29,7 @@ harnessme init
 
 By default, `init` resolves the first available signed-in inference CLI and writes integrations for every supported agent framework. In an interactive terminal it then lists the provider's available models and asks you to select one; `--model` makes that choice non-interactively. If no supported AI CLI is available, `auto` completes with deterministic generation. The CLI prints `✓` or `✗` status lines showing the effective AI, review, and deterministic modes. The `--provider` option selects inference; it does not limit generated files. Use `--targets codex,claude-code` only when you intentionally want a smaller output set.
 
-This creates the facts store in `.harnessme/`, a generated `AGENTS.md`, provider files, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
+This creates the facts store in `.harnessme/`, a concise generated `AGENTS.md`, scoped guidance under `.harnessme/references/`, provider files, a harness-quality report, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
 
 Long-running commands display a phase-by-phase progress bar describing the current operation. When output is redirected or running in CI, the same updates are emitted as stable `progress:` log lines.
 
@@ -39,13 +39,14 @@ When `harnessme init` runs, it:
 
 1. Scans supported source files with bundled syntax-tree grammars and reads repository configuration and documentation.
 2. Reads package metadata, formatter and linter settings, type configuration, contribution documentation, and Git history.
-3. Detects the stack, repository structure, coding conventions, error-handling and object-design patterns, import hubs, and frequently changed files.
+3. Detects the project purpose, repository structure, coding conventions, domain invariants, module ownership, validation commands, import hubs, frequently changed files, and documentation references that no longer match the implementation.
 4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation.
 5. Builds a deterministic `AGENTS.md` baseline and a bounded list of possible critical files and modules.
-6. In AI mode, asks the selected model to author the complete repository-specific `AGENTS.md`, including validation commands, coding guidance, and only the critical gates it considers justified by the supplied evidence.
-7. Runs a separate comparison pass—optionally through another provider/model—which compares the draft with the deterministic baseline, restores missing constraints, rejects unsupported claims, and reviews every selected gate.
-8. Enforces required safety language and managed placeholders locally, activates only reviewer-approved gates from the deterministic candidate list, then distributes the result to every selected framework.
-9. Generates the governance backstops: `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
+6. Uses a four-stage model pipeline when AI is enabled: evidence extraction, independent claim verification, harness/reference authorship, and a final baseline comparison. A focused repair pass runs only when local validation rejects the result.
+7. Authors a concise repository-specific `AGENTS.md` plus scoped reference documents for complex modules and concerns. The root contract explains what to inspect first and routes agents to ownership, invariant, workflow, and validation details only when relevant.
+8. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
+9. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, scoped references, and documentation consistency.
+10. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
 
 Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. Application source files are analyzed but not rewritten.
 
@@ -63,7 +64,7 @@ When run in a terminal without `--model`, HarnessME asks you to select a model a
 harnessme init --provider cursor --model your-model
 ```
 
-Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. A separate inference pass compares and edits that document before HarnessME validates its required sections, explicit pre-edit confirmation rule, managed placeholders, and chosen gate paths. If that output fails local validation, HarnessME requests one focused correction; if the correction is still invalid, it visibly falls back to the safe deterministic renderer instead of leaving initialization incomplete.
+Supported inference runtimes are `codex`, `claude-code`, and `cursor`. HarnessME runs them non-interactively in an isolated temporary directory containing only redacted analysis input—not the repository. Input selection prioritizes the root README, architecture/policy documents, manifests, and a balanced sample of core source from each module. The model first enriches deterministic findings with structured, evidence-cited facts. It then authors the full `AGENTS.md` from the verified facts and deterministic baseline. Existing repository documentation is used through progressive disclosure: the root contract routes agents to task-relevant documents and states when those documents must change with the code instead of duplicating them. A separate inference pass compares and edits that document before HarnessME validates pre-edit guidance, actionable operating rules and workflows, concrete core boundaries, documentation routing, exact validation commands, safety language, managed placeholders, and chosen gate paths. Inventory-style output such as language percentages is rejected. If validation fails, HarnessME requests one focused correction; if the correction is still invalid, it visibly falls back to the safe deterministic renderer instead of leaving initialization incomplete.
 
 For a second opinion, assign a separate reviewer with `--review-provider`. The reviewer verifies proposed facts before storage, then receives the redacted validated evidence bundle, deterministic baseline, and draft for the final comparison. A different provider is recommended when available:
 
@@ -81,7 +82,7 @@ harnessme init --provider http --ai-endpoint http://localhost:11434/v1/chat/comp
 
 For an authenticated endpoint, add `--ai-api-key-env AI_API_KEY`. The reviewer endpoint equivalents are `--review-ai-endpoint`, `--review-model`, and `--review-ai-api-key-env`. Model inference examines text-like source files within configured size limits. Git-ignored files, common credential paths, `.harnessmeignore` entries, secret-like lines, and prompt-injection-like lines are excluded or redacted before inference. Proposed facts must pass schema validation, local file-and-line citation checks, and model verification before entering the facts store. The audit at `.harnessme/facts/ai-inputs.json` records paths, byte counts, and redaction counts—never file contents.
 
-The reviewed AI template is stored at `.harnessme/facts/AGENTS.authored.md`; `.harnessme/facts/harness-generation.json` records the author/reviewer runtimes, models, comparison summary, and activated gates. HarnessME owns the critical-path, directives, verified-changes, and pending-note placeholders so later governance commands can update them without discarding the reviewed document.
+The reviewed AI template is stored at `.harnessme/facts/AGENTS.authored.md`; scoped documents are stored in `.harnessme/facts/references.json` and rendered under `.harnessme/references/`. `.harnessme/facts/harness-generation.json` records the author/reviewer runtimes, models, comparison summary, and activated gates. `.harnessme/facts/conflicts.json` reports documentation paths that disagree with the repository, while `.harnessme/facts/quality.json` records the scored quality checks. HarnessME owns the critical-path, directives, verified-changes, and pending-note placeholders so later governance commands can update them without discarding maintainer content.
 
 Preview exactly which files would be included without contacting a model or writing the harness:
 
@@ -91,6 +92,8 @@ harnessme init --ai-preview
 
 Use `--ai-include "src/**"`, `--ai-exclude "src/generated/**"`, or add patterns to `.harnessmeignore` for finer control. Use `--deterministic` to disable model inference for offline or privacy-sensitive runs.
 
+After the repository changes, run `harnessme refresh`. It reuses the provider, model, privacy filters, and reviewer stored during initialization, preserves maintainer directives, approved critical records, verified changes, and pending notes, and rewrites only HarnessME-managed guidance. Pass `--deterministic` for an offline refresh.
+
 ## Command reference
 
 Commands that operate on a repository accept `--root <path>` to operate on another repository root. Use `harnessme --help` for built-in help and `harnessme --version` to print the installed version.
@@ -99,12 +102,14 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | --- | --- | --- |
 | `harnessme init` | Analyze a repository and create the harness. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--extra-prompt <text>` |
 | `harnessme scan` | Report analysis drift without writing. | No command-specific options. |
+| `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic` |
 | `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>` |
+| `harnessme quality` | Score the harness and list missing operational guidance or documentation conflicts. | No command-specific options. |
 | `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail if committed facts have drifted. | `--ci` |
 | `harnessme directive add <text>` | Add a maintainer-authored instruction. | — |
 | `harnessme directive list` | Print maintained directives. | — |
-| `harnessme critical add <glob>` | Register a critical path. | `--reason <text>` and `--approvers <comma-list>` are required. |
+| `harnessme critical add <glob>` | Register a risk-classified critical path. | `--reason <text>` and `--approvers <comma-list>` are required; `--risk security|persistence|public-contract|billing|deployment|shared-core|other` overrides automatic classification. |
 | `harnessme critical list` | List critical-path rules. | — |
 | `harnessme critical activate <glob>` | Activate a proposed critical path and regenerate governance files. | — |
 | `harnessme critical draft <path>` | Start a review record before changing a critical file. | `--summary <text>` is required. |
@@ -121,6 +126,8 @@ Keep the harness current:
 
 ```bash
 harnessme scan                 # report differences without writing
+harnessme refresh              # reanalyze and update the operating contract and scoped references
+harnessme quality              # show the harness quality score and missing guidance
 harnessme validate             # verify pending notes from AGENTS.md
 harnessme sync                 # regenerate provider files
 harnessme check --ci           # fail when facts have drifted
@@ -179,7 +186,7 @@ npm run test:package
 
 Releases are published through `.github/workflows/release.yml` using npm trusted publishing and provenance. Before the first automated release, configure this GitHub repository and the `release.yml` workflow as a trusted publisher in the npm package settings, enable two-factor authentication on maintainer accounts, and create the protected GitHub environment named `npm`.
 
-Set the version in `package.json`, commit it, create a matching tag such as `v0.3.2`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
+Set the version in `package.json`, commit it, create a matching tag such as `v0.4.0`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
 
 
 

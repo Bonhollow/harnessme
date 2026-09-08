@@ -23,7 +23,7 @@ jobs:
       - name: Verify release tag matches package version
         shell: bash
         run: |
-          package_version="$(node -p \"require('./package.json').version\")"
+          package_version="$(node -p "require('./package.json').version")"
           expected_tag="v${package_version}"
           echo "Release tag: ${GITHUB_REF_NAME}"
           echo "Package version: ${package_version}"

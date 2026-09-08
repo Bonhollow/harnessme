@@ -21,7 +21,16 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Verify release tag matches package version
-        run: node -e "if (process.env.GITHUB_REF_NAME !== 'v' + require('./package.json').version) process.exit(1)"
+        shell: bash
+        run: |
+          package_version="$(node -p \"require('./package.json').version\")"
+          expected_tag="v${package_version}"
+          echo "Release tag: ${GITHUB_REF_NAME}"
+          echo "Package version: ${package_version}"
+          if [ "${GITHUB_REF_NAME}" != "${expected_tag}" ]; then
+            echo "Expected release tag ${expected_tag}, received ${GITHUB_REF_NAME}." >&2
+            exit 1
+          fi
       - run: npm run lint
       - run: npm test
       - run: npm run test:package

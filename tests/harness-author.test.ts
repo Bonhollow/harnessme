@@ -158,14 +158,16 @@ function operationalReferences() {
 describe("AI harness authoring", () => {
   it("repairs a reviewed document that omits a required section", async () => {
     let requests = 0;
+    let draftSchema: Record<string, unknown> | undefined;
     const server = createServer((request, response) => {
       let body = "";
       request.setEncoding("utf8");
       request.on("data", (chunk) => { body += chunk; });
       request.once("end", () => {
         requests += 1;
-        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string; schema?: Record<string, unknown> } } };
         const schema = payload.response_format?.json_schema?.name;
+        if (schema === "harnessme_agents_draft") draftSchema = payload.response_format?.json_schema?.schema;
         const result = schema === "harnessme_agents_draft"
           ? { markdown: harnessMarkdown(true), gates: [] }
           : schema === "harnessme_agents_review"
@@ -221,6 +223,14 @@ describe("AI harness authoring", () => {
     expect(result.markdown).toContain("## Repository map");
     expect(result.comparison).toContain("Restored");
     expect(requests).toBe(3);
+    const gateItems = (draftSchema?.properties as Record<string, { items?: { required?: string[]; properties?: Record<string, unknown> } }> | undefined)?.gates?.items;
+    expect(gateItems?.required).toEqual(["path", "reason", "risk"]);
+    expect(gateItems?.properties?.risk).toEqual({
+      anyOf: [
+        { type: "string", enum: ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] },
+        { type: "null" },
+      ],
+    });
   });
 
   it("rejects an inventory report and repairs it into operational instructions", async () => {

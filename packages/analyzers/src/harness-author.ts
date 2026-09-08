@@ -9,11 +9,15 @@ const CRITICAL_PATHS_TOKEN = "{{HARNESSME_CRITICAL_PATHS}}";
 const PENDING_TOKEN = "{{HARNESSME_PENDING}}";
 const DIRECTIVES_TOKEN = "{{HARNESSME_DIRECTIVES}}";
 const VERIFIED_CHANGES_TOKEN = "{{HARNESSME_VERIFIED_CHANGES}}";
+const RISK_VALUES = ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] as const;
 
 const GateSchema = z.object({
   path: z.string().min(1).max(500),
   reason: z.string().min(1).max(300).refine((value) => !/[\r\n]/u.test(value)),
-  risk: z.enum(["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"]).optional(),
+  // Strict structured-output providers require every declared property to be
+  // required. Null keeps the field required while allowing the model to defer
+  // classification; HarnessME then supplies the deterministic classification.
+  risk: z.enum(RISK_VALUES).nullable().default(null),
 });
 
 const DraftSchema = z.object({
@@ -40,9 +44,14 @@ const gateJsonSchema = {
         properties: {
           path: { type: "string", minLength: 1, maxLength: 500 },
           reason: { type: "string", minLength: 1, maxLength: 300, pattern: "^[^\\r\\n]+$" },
-          risk: { type: "string", enum: ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] },
+          risk: {
+            anyOf: [
+              { type: "string", enum: RISK_VALUES },
+              { type: "null" },
+            ],
+          },
         },
-        required: ["path", "reason"],
+        required: ["path", "reason", "risk"],
       },
     },
     references: {
@@ -71,7 +80,7 @@ const reviewJsonSchema = {
     ...gateJsonSchema.properties,
     comparison: { type: "string", minLength: 1, maxLength: 2_000 },
   },
-  required: ["markdown", "gates", "comparison"],
+  required: ["markdown", "gates", "references", "comparison"],
 };
 
 interface GateCandidate {
@@ -85,7 +94,7 @@ interface GateCandidate {
 
 export interface AuthoredHarnessResult {
   markdown: string;
-  gates: Array<{ path: string; reason: string; risk?: GateCandidate["risk"] }>;
+  gates: Array<{ path: string; reason: string; risk: GateCandidate["risk"] }>;
   references: ReferenceDocument[];
   authorRuntime: string;
   reviewerRuntime: string;
@@ -171,7 +180,7 @@ function normalizeHeadingAliases(markdown: string): string {
 
 function validateAuthoredMarkdown(
   markdown: string,
-  gates: Array<{ path: string; reason: string; risk?: GateCandidate["risk"] }>,
+  gates: Array<{ path: string; reason: string; risk: GateCandidate["risk"] | null }>,
   references: ReferenceDocument[],
   eligible: Set<string>,
   facts: FactsSnapshot,
@@ -408,9 +417,13 @@ Correct that exact defect while preserving all valid content and constraints. Re
       comparison: `${reviewed.comparison}\nRepair: ${repaired.comparison}`,
     };
   }
+  const normalizedGates = final.gates.map((gate) => ({
+    ...gate,
+    risk: gate.risk ?? classifyRisk(gate.path),
+  }));
   return {
     markdown: validated,
-    gates: [...new Map(final.gates.map((gate) => [gate.path, { ...gate, risk: gate.risk ?? classifyRisk(gate.path) }])).values()],
+    gates: [...new Map(normalizedGates.map((gate) => [gate.path, gate])).values()],
     references: [...new Map(final.references.map((reference) => [reference.slug, reference])).values()],
     authorRuntime: author.name,
     reviewerRuntime: reviewer.name,

@@ -179,6 +179,13 @@ function normalizeHeadingAliases(markdown: string): string {
     .replace(/^##[ \t]+Keeping this harness current[ \t]*$/gimu, "## Keeping this harness current");
 }
 
+function normalizeReferenceHeadingAliases(markdown: string): string {
+  return markdown
+    .replace(/^##[ \t]+(?:Ownership|Ownership and invariants)[ \t]*$/gimu, "## Responsibilities")
+    .replace(/^##[ \t]+Workflow[ \t]*$/gimu, "## Change workflow")
+    .replace(/^##[ \t]+(?:Checks|Verification)[ \t]*$/gimu, "## Validation");
+}
+
 function normalizeReferenceScope(reference: ReferenceDocument, analysis: AnalysisResult, facts: FactsSnapshot): ReferenceDocument {
   const isGrounded = (scope: string): boolean => {
     const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
@@ -188,7 +195,7 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
   const complete = (value: ReferenceDocument): ReferenceDocument => {
     const scopeBase = value.scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
     const citation = facts.evidence.find((item) => item.path === scopeBase || item.path.startsWith(`${scopeBase}/`));
-    let markdown = value.markdown;
+    let markdown = normalizeReferenceHeadingAliases(value.markdown);
     const append = (heading: string, body: string): void => {
       if (!markdown.includes(`## ${heading}`)) markdown += `\n\n## ${heading}\n\n${body}`;
     };
@@ -203,6 +210,14 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
     const invariants = sectionBody(markdown, "## Invariants");
     if (!/\b(?:must|preserve|never|do not|keep|remain)\b/iu.test(invariants)) {
       markdown = markdown.replace("## Invariants", `## Invariants\n\n- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`);
+    }
+    const workflow = sectionBody(markdown, "## Change workflow");
+    const workflowSteps = workflow.split(/\r?\n/u).filter((line) => /^\s*(?:[-*]|\d+\.)\s+/u.test(line)).length;
+    if (workflowSteps < 2) {
+      markdown = markdown.replace(
+        "## Change workflow",
+        "## Change workflow\n\n1. Inspect the owning implementation, callers, and nearby tests.\n2. Update affected consumers and tests together.",
+      );
     }
     return { ...value, markdown };
   };
@@ -419,7 +434,10 @@ export async function authorHarnessWithAi(options: {
   const candidates = gateCandidates(options.analysis);
   const eligible = new Set(candidates.map((item) => item.path));
   const evidenceBundle = {
-    stack: options.facts.stack,
+    stack: {
+      ...options.facts.stack,
+      sourcePaths: options.facts.stack.sourcePaths?.slice(0, 500),
+    },
     conventions: options.facts.conventions,
     evidence: options.facts.evidence,
     architecture: options.facts.architecture,

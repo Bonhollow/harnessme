@@ -8,6 +8,7 @@ import { classifyRisk } from "../packages/core/src/risk.js";
 import { criticalCandidates } from "../packages/analyzers/src/critical-candidates.js";
 import { analyzeDocumentation } from "../packages/analyzers/src/documentation.js";
 import { referenceDocuments } from "../packages/renderers/src/reference-pack.js";
+import { nestedAgentDocuments } from "../packages/renderers/src/guidance/nested-agents.js";
 
 function snapshot(authored = ""): FactsSnapshot {
   const generatedAt = new Date().toISOString();
@@ -103,5 +104,41 @@ describe("harness quality benchmark", () => {
     expect(documents[0]).toEqual(expect.objectContaining({ slug: "src-workflow" }));
     expect(documents[0]?.markdown).toContain("## Change workflow");
     expect(documents[0]?.markdown).toContain("`npm test`");
+  });
+
+  it("creates concern-specific references and nested module guidance", () => {
+    const facts = snapshot();
+    facts.referencePack = undefined;
+    facts.stack.sourcePaths = [
+      "src/coreval/api/services/token_provider.py",
+      "src/coreval/api/services/experiment_repository.py",
+      "src/coreval/evals/experiment_runner.py",
+      "src/coreval/api/services/dataset_service.py",
+    ];
+    facts.evidence.push(
+      { id: "auth", path: "src/coreval/api/services/token_provider.py", line: 20, kind: "ai", excerpt: "TokenProviderError guards token refresh" },
+      { id: "db", path: "src/coreval/api/services/experiment_repository.py", line: 57, kind: "ai", excerpt: "idempotency_key unique index" },
+    );
+    const references = referenceDocuments(facts);
+    expect(references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: "Authentication and security", scope: "src/coreval/api/**" }),
+      expect.objectContaining({ title: "Persistence and idempotency", scope: "src/coreval/api/**" }),
+      expect.objectContaining({ title: "Evaluation execution", scope: "src/coreval/evals/**" }),
+      expect.objectContaining({ title: "Dataset synchronization", scope: "src/coreval/api/**" }),
+    ]));
+    expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("## Anti-patterns");
+    expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("`src/coreval/api/services/token_provider.py`");
+    expect(nestedAgentDocuments(facts)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("Authentication and security") }),
+    ]));
+    expect(nestedAgentDocuments(facts, [{
+      slug: "persistence",
+      title: "Persistence",
+      scope: "src/coreval/api/models/**",
+      description: "Persistence rules.",
+      markdown: "Use `src/coreval/api/services/experiment_repository.py` with the models.",
+    }])).toEqual([
+      expect.objectContaining({ directory: "src/coreval/api" }),
+    ]);
   });
 });

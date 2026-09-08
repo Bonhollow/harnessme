@@ -118,24 +118,25 @@ export async function analyzeAst(path: string): Promise<AstSignals | undefined> 
     const catchTypes = grammar === "python" ? ["except_clause"] : ["catch_clause", "rescue"];
     const classTypes = ["class_declaration", "class_definition", "class_specifier", "struct_item"];
     const inherited: Array<{ line: number; excerpt: string }> = [];
-    for (const node of root.descendantsOfType(classTypes)) {
+    const classes = root.descendantsOfType(classTypes).filter((node): node is Node => node !== null);
+    for (const node of classes) {
       if (/\bextends\b|class\s+\w+\s*\([^)]/u.test(node.text)) {
         inherited.push({ line: node.startPosition.row + 1, excerpt: excerpt(node) });
       }
     }
-    const calls = root.descendantsOfType("call_expression");
+    const calls = root.descendantsOfType("call_expression").filter((node): node is Node => node !== null);
     return {
       parsed: true,
       hasErrors: root.hasError,
-      throws: root.descendantsOfType(throwTypes).map((node) => ({
+      throws: root.descendantsOfType(throwTypes).filter((node): node is Node => node !== null).map((node) => ({
         line: node.startPosition.row + 1,
         excerpt: excerpt(node),
       })),
-      catches: root.descendantsOfType(catchTypes).map((node) => ({
+      catches: root.descendantsOfType(catchTypes).filter((node): node is Node => node !== null).map((node) => ({
         line: node.startPosition.row + 1,
         excerpt: excerpt(node),
       })),
-      classes: root.descendantsOfType(classTypes).length,
+      classes: classes.length,
       inheritedClasses: inherited,
       imports: importSpecifiers(source, grammar),
       testCalls: calls

@@ -257,6 +257,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     validationCommands: packageData.commands,
     projectSummary: packageData.projectSummary,
     documentationPaths: documentation.paths,
+    sourcePaths: [...new Set(files.map(posixPath))].sort(),
   };
   const packageJson = await readable(join(root, "package.json"));
   const projectName = packageJson

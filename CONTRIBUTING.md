@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node.js 20.19 or newer. Install dependencies with `npm install`, then run `npm run lint` and `npm test` before opening a pull request.
+Use Node.js 26.4 or newer. Install dependencies with `npm install`, then run `npm run lint` and `npm test` before opening a pull request.
 
 Keep analyzers evidence-backed: every new inferred convention needs at least one repository-relative file and line citation. Keep provider-specific behavior in `packages/renderers`; shared facts and governance belong in `packages/core`.
 

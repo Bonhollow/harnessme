@@ -151,7 +151,7 @@ function operationalReferences() {
     title: "Core change guide",
     scope: "src/**",
     description: "Read before changing the core service.",
-    markdown: "# Core change guide\n\n## Scope\n\n`src/**`\n\n## Responsibilities\n\n- Keep service behavior in `src/core.ts`. Evidence: `src/core.ts:1`.\n\n## Invariants\n\n- Preserve the public service contract.\n\n## Change workflow\n\n1. Update the service and its consumers together.\n2. Run the focused validation command.\n\n## Validation\n\nRun `npm test`.\n",
+    markdown: "# Core change guide\n\n## Scope\n\n`src/**`\n\n## Ownership\n\n- Keep service behavior in `src/core.ts`. Evidence: `src/core.ts:1`.\n\n## Invariants\n\n- Preserve the public service contract.\n\n## Workflow\n\nUpdate the service, its consumers, and focused tests together.\n\n## Validation\n\nRun `npm test`.\n",
   }];
 }
 
@@ -304,6 +304,9 @@ describe("AI harness authoring", () => {
     expect(result.markdown).toContain("## Core boundaries");
     expect(result.markdown).toContain("`docs/CORE.md`");
     expect(result.references).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "core", scope: "src/**" })]));
+    expect(result.references[0]?.markdown).toContain("## Responsibilities");
+    expect(result.references[0]?.markdown).toContain("1. Inspect the owning implementation");
+    expect(result.references[0]?.markdown).not.toContain("## Workflow");
     expect(result.markdown).not.toContain("100%");
     expect(requests).toBe(4);
   });

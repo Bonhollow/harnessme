@@ -1,4 +1,5 @@
 import type { FactsSnapshot, ReferenceDocument } from "@harnessme/core";
+import { concernReferenceDocuments } from "./guidance/concerns.js";
 
 function titleFor(scope: string): string {
   return scope.split(/[\/_-]/u).filter(Boolean).map((part) => ["api", "ui", "db", "mcp"].includes(part.toLowerCase())
@@ -17,6 +18,8 @@ function operationalStatement(statement: string, category: string): string {
 
 export function referenceDocuments(facts: FactsSnapshot): ReferenceDocument[] {
   if (facts.referencePack?.documents.length) return facts.referencePack.documents;
+  const concerns = concernReferenceDocuments(facts);
+  if (concerns.length) return concerns;
   const evidence = new Map(facts.evidence.map((item) => [item.id, item]));
   const moduleFacts = new Map(facts.stack.topLevelModules.map((module) => [module, facts.conventions.facts.filter((fact) =>
     fact.evidence.some((id) => evidence.get(id)?.path.startsWith(`${module}/`))

@@ -2,11 +2,11 @@
 
 HarnessME analyzes a repository and turns its real structure and conventions into shared instructions for AI coding agents. It generates `AGENTS.md` and provider-specific files, detects drift, identifies high-impact files from change frequency and import fan-in, and gates invasive changes to critical paths.
 
-It is a local, scriptable CLI: no account, dashboard, or hosted service required.
+It is a local, scriptable CLI: no account or hosted service required.
 
 ## Install
 
-Requires Node.js 20.19 or newer on Windows, macOS, or Linux.
+Requires Node.js 26.4 or newer on Windows, macOS, or Linux. The dashboard automatically enables Node's experimental FFI flag required by OpenTUI.
 
 ```bash
 npm install -g harnessme
@@ -21,6 +21,8 @@ For model-assisted generation, install and sign in to at least one supported fra
 
 ## Use
 
+Run `harnessme` without a subcommand to open the full-screen terminal dashboard. It shows the current mode, provider, model, quality score, gate counts, scoped-guide count, and a live preview of `AGENTS.md`. Use the dashboard to initialize or refresh the harness, switch inference provider/model, run quality and gate reports, synchronize integrations, or remove HarnessME state. Arrow keys navigate, Enter selects, and Escape or `q` exits.
+
 Initialize HarnessME from the root of an existing repository:
 
 ```bash
@@ -29,7 +31,7 @@ harnessme init
 
 By default, `init` resolves the first available signed-in inference CLI and writes integrations for every supported agent framework. In an interactive terminal it then lists the provider's available models and asks you to select one; `--model` makes that choice non-interactively. If no supported AI CLI is available, `auto` completes with deterministic generation. The CLI prints `✓` or `✗` status lines showing the effective AI, review, and deterministic modes. The `--provider` option selects inference; it does not limit generated files. Use `--targets codex,claude-code` only when you intentionally want a smaller output set.
 
-This creates the facts store in `.harnessme/`, a concise generated `AGENTS.md`, scoped guidance under `.harnessme/references/`, provider files, a harness-quality report, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
+This creates the facts store in `.harnessme/`, a concise root `AGENTS.md`, concern guides under `.harnessme/references/`, nested `AGENTS.md` files beside the modules they govern, provider files, a harness-quality report, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
 
 Long-running commands display a phase-by-phase progress bar describing the current operation. When output is redirected or running in CI, the same updates are emitted as stable `progress:` log lines.
 
@@ -43,7 +45,7 @@ When `harnessme init` runs, it:
 4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation.
 5. Builds a deterministic `AGENTS.md` baseline and a bounded list of possible critical files and modules.
 6. Uses a four-stage model pipeline when AI is enabled: evidence extraction, independent claim verification, harness/reference authorship, and a final baseline comparison. A focused repair pass runs only when local validation rejects the result.
-7. Authors a concise repository-specific `AGENTS.md` plus scoped reference documents for complex modules and concerns. The root contract explains what to inspect first and routes agents to ownership, invariant, workflow, and validation details only when relevant.
+7. Authors a concise repository-specific root `AGENTS.md`, concern-focused references with ownership paths, invariants, anti-patterns, workflows, and validation, then places nested `AGENTS.md` routing files in the applicable module directories. Obsolete managed module guides are removed on refresh.
 8. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
 9. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, scoped references, and documentation consistency.
 10. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
@@ -161,6 +163,7 @@ For registered paths, generated agent instructions require explicit developer co
 ## Behind the scenes
 
 - `web-tree-sitter` and VS Code WASM grammars for deterministic multi-language analysis
+- `OpenTUI` for the cross-platform full-screen terminal dashboard
 - `zod` for validating the version-controlled facts store
 - `Ruler` for distributing instructions to agent-specific formats
 - `js-yaml`, TOML, and frontmatter parsing for project configuration and critical-change records

@@ -55,6 +55,7 @@ export const StackSchema = z.object({
   validationCommands: z.array(z.string()).optional(),
   projectSummary: z.string().min(1).optional(),
   documentationPaths: z.array(z.string()).optional(),
+  sourcePaths: z.array(z.string()).optional(),
 });
 
 const InferenceConfigSchema = z.object({

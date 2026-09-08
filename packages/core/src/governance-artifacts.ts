@@ -86,7 +86,7 @@ export async function renderHarnessWorkflow(root: string): Promise<string> {
     "          fetch-depth: 0",
     "      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4",
     "        with:",
-    "          node-version: 20",
+    "          node-version: 26",
     `      - run: npx --yes ${packageSpec} validate --ci`,
     "      - run: git diff --exit-code",
     `      - run: npx --yes ${packageSpec} check --ci`,

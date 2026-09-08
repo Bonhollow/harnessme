@@ -36,7 +36,9 @@ const main = defineCommand({
     quality,
     refresh,
   },
-  run: async () => dashboard(),
+  run: async () => {
+    if (process.argv.length <= 2) await dashboard();
+  },
 });
 
 runMain(main);

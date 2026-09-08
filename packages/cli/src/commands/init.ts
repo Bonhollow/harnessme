@@ -30,7 +30,7 @@ import {
   type InferenceProviderId,
 } from "@harnessme/analyzers";
 import { GENERATED_MARKER, providers, referenceDocuments, renderAgentsMd, resolveProviders, syncHarness } from "@harnessme/renderers";
-import { createProgress, disabled, enabled, info, warn } from "../output.js";
+import { createProgress, disabled, enabled, info, panel, warn } from "../output.js";
 import { projectRoot, providerValues } from "../project.js";
 import { selectModel } from "../selection.js";
 
@@ -346,5 +346,11 @@ export default defineCommand({
     info(`Critical paths: ${activeCount} active, ${proposedCount} proposed. Review .harnessme/critical-paths.yaml, then run \`harnessme hooks install\`.`);
     info(`Harness quality: ${quality.score}/100. Run \`harnessme quality\` for details.`);
     info(`Generated ${result.files.join(", ")}.`);
+    panel("HarnessME complete", [
+      `Mode: ${config.analysis.aiFallback ? "AI evidence + council" : "deterministic"}`,
+      `Quality: ${quality.score}/100`,
+      `Core gates: ${activeCount} active, ${proposedCount} proposed`,
+      `Targets: ${result.targets.join(", ")}`,
+    ]);
   },
 });

@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import type { AvailableModel, InferenceProviderId } from "@harnessme/analyzers";
-import { info } from "./output.js";
+import { info, panel, terminalUiEnabled } from "./output.js";
 
 export async function selectModel(
   provider: InferenceProviderId,
@@ -11,6 +11,10 @@ export async function selectModel(
   if (supplied || !stdin.isTTY || !stdout.isTTY) return supplied;
   const prompt = createInterface({ input: stdin, output: stdout });
   try {
+    if (terminalUiEnabled()) panel("HarnessME model selection", [
+      `Provider: ${provider}`,
+      available.length ? "Choose an available model or enter a custom ID." : "Enter a model ID, or use the provider default.",
+    ]);
     if (!available.length) {
       const answer = (await prompt.question(`Model for ${provider} (Enter = provider default, or type a model ID): `)).trim();
       return answer || undefined;

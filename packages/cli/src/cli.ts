@@ -13,6 +13,7 @@ import targets from "./commands/targets.js";
 import quality from "./commands/quality.js";
 import refresh from "./commands/refresh.js";
 import { HARNESSME_VERSION } from "@harnessme/core";
+import { dashboard } from "./dashboard.js";
 
 const main = defineCommand({
   meta: {
@@ -35,6 +36,7 @@ const main = defineCommand({
     quality,
     refresh,
   },
+  run: async () => dashboard(),
 });
 
 runMain(main);

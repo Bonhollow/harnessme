@@ -99,6 +99,7 @@ export interface AuthoredHarnessResult {
   authorRuntime: string;
   reviewerRuntime: string;
   comparison: string;
+  councilReviews: number;
 }
 
 export class AuthoredHarnessValidationError extends Error {
@@ -178,6 +179,56 @@ function normalizeHeadingAliases(markdown: string): string {
     .replace(/^##[ \t]+Keeping this harness current[ \t]*$/gimu, "## Keeping this harness current");
 }
 
+function normalizeReferenceScope(reference: ReferenceDocument, analysis: AnalysisResult, facts: FactsSnapshot): ReferenceDocument {
+  const isGrounded = (scope: string): boolean => {
+    const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
+    return scope === "**/*" || analysis.sourceFiles.some((path) => path === base || path.startsWith(`${base}/`))
+      || (facts.stack.documentationPaths ?? []).some((path) => path === base || path.startsWith(`${base}/`));
+  };
+  const complete = (value: ReferenceDocument): ReferenceDocument => {
+    const scopeBase = value.scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
+    const citation = facts.evidence.find((item) => item.path === scopeBase || item.path.startsWith(`${scopeBase}/`));
+    let markdown = value.markdown;
+    const append = (heading: string, body: string): void => {
+      if (!markdown.includes(`## ${heading}`)) markdown += `\n\n## ${heading}\n\n${body}`;
+    };
+    append("Responsibilities", `- Own changes within \`${value.scope}\` through the existing implementation seam.`);
+    append("Invariants", `- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`);
+    append("Change workflow", "1. Inspect the owning implementation, callers, and nearby tests.\n2. Update affected consumers and tests together.\n3. Run the relevant validated checks.");
+    append("Validation", "Run the repository's validated checks relevant to the changed behavior.");
+    return { ...value, markdown };
+  };
+  const compositeScope = /[,;{}]/u.test(reference.scope);
+  if (isGrounded(reference.scope) && !compositeScope) return complete(reference);
+  const prefix = reference.scope.split(/[,{;]/u)[0]?.replace(/\*.*$/u, "").replace(/\/$/u, "");
+  if (!prefix) return reference;
+  const segments = prefix.split("/");
+  while (segments.length) {
+    const candidate = `${segments.join("/")}/**`;
+    if (isGrounded(candidate)) {
+      const markdown = reference.markdown.replace(/(## Scope\s+)([\s\S]*?)(?=\n## |$)/u, `$1Use this guide for changes in \`${candidate}\`.\n`);
+      return complete({ ...reference, scope: candidate, markdown });
+    }
+    segments.pop();
+  }
+  return complete(reference);
+}
+
+function completeConventionCitations(markdown: string, facts: FactsSnapshot): string {
+  const evidenceById = new Map(facts.evidence.map((item) => [item.id, item]));
+  const missing = facts.conventions.facts.flatMap((convention) => {
+    const cited = convention.evidence.some((id) => {
+      const item = evidenceById.get(id);
+      return item ? markdown.includes(`${item.path}:${item.line}`) : false;
+    });
+    const evidence = convention.evidence.map((id) => evidenceById.get(id)).find(Boolean);
+    return !cited && evidence ? [`- Preserve this verified convention: ${convention.statement} Evidence: \`${evidence.path}:${evidence.line}\`.`] : [];
+  });
+  return missing.length
+    ? markdown.replace("## Operating rules", `## Operating rules\n\n${missing.join("\n")}`)
+    : markdown;
+}
+
 function validateAuthoredMarkdown(
   markdown: string,
   gates: Array<{ path: string; reason: string; risk: GateCandidate["risk"] | null }>,
@@ -186,7 +237,7 @@ function validateAuthoredMarkdown(
   facts: FactsSnapshot,
   analysis: AnalysisResult,
 ): string {
-  const normalized = normalizeHeadingAliases(markdown.trim());
+  let normalized = normalizeHeadingAliases(markdown.trim());
   if (normalized.split(/\r?\n/u).length > 220) invalid("AI-authored root AGENTS.md is too long; move detailed guidance into scoped references.");
   const requiredSections = [
     "# Repository instructions",
@@ -208,6 +259,7 @@ function validateAuthoredMarkdown(
   for (const section of requiredSections) {
     if (!normalized.includes(section)) invalid(`AI-authored AGENTS.md is missing required section: ${section}`);
   }
+  normalized = completeConventionCitations(normalized, facts);
   const requiredTokens = [CRITICAL_PATHS_TOKEN, PENDING_TOKEN, DIRECTIVES_TOKEN, VERIFIED_CHANGES_TOKEN];
   if (!requiredTokens.every((token) => occurrences(normalized, token) === 1)) {
     invalid("AI-authored AGENTS.md must contain each HarnessME managed placeholder exactly once.");
@@ -289,14 +341,22 @@ function validateAuthoredMarkdown(
   const boundaryPaths = [...coreBoundaries.matchAll(/`([^`]+)`/gu)].flatMap((match) => match[1] ? [match[1]] : []);
   const groundedBoundary = boundaryPaths.some(groundedPath);
   if (analysis.sourceFiles.length && !groundedBoundary) {
-    invalid("AI-authored AGENTS.md must identify at least one concrete core boundary by repository-relative path.");
+    const fallbackBoundary = gates[0]?.path
+      ?? analysis.sourceFiles.find((path) => /(?:^|\/)(?:core|domain|services?|repositories|auth|api)(?:\/|\.|$)/iu.test(path));
+    if (!fallbackBoundary) invalid("AI-authored AGENTS.md must identify at least one concrete core boundary by repository-relative path.");
+    normalized = normalized.replace(
+      "## Core boundaries",
+      `## Core boundaries\n\n- \`${fallbackBoundary}\` is a verified repository seam. Inspect its callers, tests, and affected contracts before changing it.`,
+    );
   }
   const projectPurpose = sectionBody(normalized, "## Project purpose");
   if (projectPurpose.length < 20 || /^(?:none|unknown|not detected)/iu.test(projectPurpose)) {
     invalid("AI-authored AGENTS.md must explain the repository's purpose, not report an inventory.");
   }
   const beforeEditing = sectionBody(normalized, "## Before editing");
-  if (!/\b(?:inspect|read|identify|trace|review)\b/iu.test(beforeEditing) || !/\b(?:before|first)\b/iu.test(beforeEditing)) {
+  // The heading itself establishes the timing; require concrete evidence-gathering
+  // actions without rejecting equivalent wording such as "before changing code".
+  if (!/\b(?:inspect|read|identify|trace|review)\b/iu.test(beforeEditing)) {
     invalid("AI-authored AGENTS.md must tell agents what repository evidence to inspect before editing.");
   }
   const workflows = sectionBody(normalized, "## Change workflows");
@@ -343,6 +403,7 @@ export async function authorHarnessWithAi(options: {
   deterministicBaseline: string;
   inference: AiFallbackConfig;
   review?: AiReviewConfig;
+  councilSize?: number;
   previousHarness?: string;
   previousReferences?: ReferenceDocument[];
   onPhase?: (message: string) => void;
@@ -388,16 +449,31 @@ Choose gates only from gateCandidates. Gate only genuinely central, high-impact 
   const reviewSystem = `Act as an independent harness reviewer and final editor. Compare the AI draft against the deterministic baseline and validated evidence. Return a corrected, complete final Markdown document—not commentary or a patch. Reject an inventory report: the result must be a practical operating contract that tells a coding agent what to inspect first, where changes belong, which core invariants and boundaries must survive, what must be updated together, which existing documents apply to the task, and which exact checks prove the work. Prefer a concise root contract with progressive disclosure into repository documentation. It must retain every validation command verbatim and at least one path:line citation for each convention. Mention technologies only when operationally relevant. Avoid invented commands or architecture, language percentages, file counts, dependency inventories, and raw import counts. Review every proposed gate for impact and remove gates that are broad, weakly supported, or merely convenient. You may select only supplied gateCandidates.
 
 Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VERIFIED_CHANGES_TOKEN}, ${DIRECTIVES_TOKEN}, and ${PENDING_TOKEN}. Review the scoped references as carefully as the root document; remove repetition and unsupported claims while retaining concrete ownership, invariants, workflows, and validation. The critical-path section must explicitly require the coding agent to stop and ask the developer for explicit confirmation before editing a listed path, and must prohibit self-approval or bypass. Return a short comparison summary alongside the corrected Markdown, references, and final gates.`;
-  const reviewed = ReviewSchema.parse(await reviewer.generate(
+  const councilSize = options.councilSize ?? 2;
+  const reviewedCandidates = await Promise.all(Array.from({ length: councilSize }, async (_, index) => ReviewSchema.parse(await reviewer.generate(
     "harnessme_agents_review",
     reviewJsonSchema,
-    reviewSystem,
+    `${reviewSystem}\nYou are council reviewer ${index + 1} of ${councilSize}; independently challenge unsupported claims before returning your candidate.`,
     JSON.stringify({ evidenceBundle, draft }),
-  ));
+  ))));
+  let reviewed = reviewedCandidates[0];
+  if (!reviewed) throw new Error("Harness council produced no review candidate.");
   let final = reviewed;
-  let validated: string;
+  let validated = "";
   try {
-    validated = validateAuthoredMarkdown(reviewed.markdown, reviewed.gates, reviewed.references, eligible, options.facts, options.analysis);
+    let lastError: unknown;
+    let selected = false;
+    for (const candidate of reviewedCandidates) {
+      try {
+        const references = candidate.references.map((reference) => normalizeReferenceScope(reference, options.analysis, options.facts));
+        validated = validateAuthoredMarkdown(candidate.markdown, candidate.gates, references, eligible, options.facts, options.analysis);
+        final = { ...candidate, references };
+        reviewed = candidate;
+        selected = true;
+        break;
+      } catch (error) { lastError = error; }
+    }
+    if (!selected) throw lastError;
   } catch (error) {
     const validationError = error instanceof Error ? error.message : String(error);
     options.onPhase?.(`Repairing rejected AGENTS.md with ${reviewer.name}`);
@@ -411,9 +487,11 @@ Correct that exact defect while preserving all valid content and constraints. Re
       repairSystem,
       JSON.stringify({ evidenceBundle, draft, failedReview: reviewed, validationError }),
     ));
-    validated = validateAuthoredMarkdown(repaired.markdown, repaired.gates, repaired.references, eligible, options.facts, options.analysis);
+    const references = repaired.references.map((reference) => normalizeReferenceScope(reference, options.analysis, options.facts));
+    validated = validateAuthoredMarkdown(repaired.markdown, repaired.gates, references, eligible, options.facts, options.analysis);
     final = {
       ...repaired,
+      references,
       comparison: `${reviewed.comparison}\nRepair: ${repaired.comparison}`,
     };
   }
@@ -427,6 +505,7 @@ Correct that exact defect while preserving all valid content and constraints. Re
     references: [...new Map(final.references.map((reference) => [reference.slug, reference])).values()],
     authorRuntime: author.name,
     reviewerRuntime: reviewer.name,
-    comparison: final.comparison,
+    comparison: `${final.comparison}\nCouncil: ${councilSize} independent review candidate(s) evaluated.`,
+    councilReviews: councilSize,
   };
 }

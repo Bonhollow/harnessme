@@ -23,6 +23,7 @@ import {
   analyzeProject,
   AuthoredHarnessValidationError,
   authorHarnessWithAi,
+  criticalCandidates,
   discoverAvailableModels,
   previewAiInputs,
   resolveInferenceProvider,
@@ -64,6 +65,7 @@ export default defineCommand({
   args: {
     provider: { type: "string", description: "Inference provider: auto, codex, claude-code, cursor, or http", default: "auto" },
     "review-provider": { type: "string", description: "Optional independent fact reviewer: auto, codex, claude-code, cursor, or http" },
+    "council-size": { type: "string", description: "Independent AGENTS.md reviewers (1-3; default 2)", default: "2" },
     targets: { type: "string", description: "Comma-separated output targets; defaults to every supported framework" },
     "extra-prompt": { type: "string", description: "Maintainer-authored project directive" },
     "critical-approvers": { type: "string", description: "Comma-separated handles for automatically detected critical paths", default: "developer" },
@@ -87,6 +89,9 @@ export default defineCommand({
     }
     const selected = resolveProviders(providerValues(args.targets) ?? providers.map((provider) => provider.id));
     const config = defaultConfig(selected.map((provider) => provider.id));
+    const councilSize = Number(args.councilSize);
+    if (!Number.isInteger(councilSize) || councilSize < 1 || councilSize > 3) throw new Error("--council-size must be 1, 2, or 3.");
+    config.analysis.councilSize = councilSize;
     if (!args.deterministic) {
       const requestedProvider = normalizeProvider(String(args.provider), "--provider");
       const endpoint = typeof args.aiEndpoint === "string" ? args.aiEndpoint : undefined;
@@ -230,6 +235,17 @@ export default defineCommand({
           risk: classifyRisk(candidate.path),
         });
       }
+      for (const candidate of criticalCandidates(analysis.sourceFiles)) {
+        if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
+        criticalPaths.paths.push({
+          glob: candidate.path,
+          reason: candidate.reason,
+          approvers,
+          source: "heuristic",
+          status: "proposed",
+          risk: candidate.risk,
+        });
+      }
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     }
     config.languages = analysis.stack.languages.map((language) => language.name);
@@ -253,6 +269,7 @@ export default defineCommand({
           deterministicBaseline: renderAgentsMd(snapshot),
           inference: config.analysis.aiFallback,
           review: config.analysis.review,
+          councilSize: config.analysis.councilSize,
           onPhase: (message) => progress.step(message),
         });
         for (const gate of authored.gates) {

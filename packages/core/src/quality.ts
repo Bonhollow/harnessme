@@ -34,11 +34,13 @@ export function assessHarnessQuality(
     { id: "workflows", passed: has(markdown, "Change workflows") && groundedPaths.some((path) => workflow.includes(`\`${path}\``)), points: 10, message: "Common changes have repository-specific workflows grounded in concrete paths." },
     { id: "reference-pack", passed: Boolean(facts.referencePack?.documents.length), points: 10, message: "Scoped reference documents provide progressive disclosure." },
     { id: "documentation-consistency", passed: conflicts.length === 0, points: 5, message: conflicts.length ? `${conflicts.length} documentation/code conflict(s) require review.` : "No broken repository-path references were found in operating documentation." },
+    { id: "ai-authoring", passed: facts.generation?.status !== "deterministic-fallback", points: 0, message: facts.generation?.status === "deterministic-fallback" ? `AI authorship fell back to deterministic guidance: ${facts.generation.reason ?? "validation failed"}` : "AI authoring status does not indicate a rejected authored harness." },
   ];
+  const rawScore = checks.filter((check) => check.passed).reduce((sum, check) => sum + check.points, 0);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    score: checks.filter((check) => check.passed).reduce((sum, check) => sum + check.points, 0),
+    score: facts.generation?.status === "deterministic-fallback" ? Math.min(rawScore, 60) : rawScore,
     checks,
   };
 }

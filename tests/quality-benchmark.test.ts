@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { FactsSnapshot } from "../packages/core/src/facts-store.js";
 import { assessHarnessQuality } from "../packages/core/src/quality.js";
 import { classifyRisk } from "../packages/core/src/risk.js";
+import { criticalCandidates } from "../packages/analyzers/src/critical-candidates.js";
 import { analyzeDocumentation } from "../packages/analyzers/src/documentation.js";
 import { referenceDocuments } from "../packages/renderers/src/reference-pack.js";
 
@@ -70,6 +71,28 @@ describe("harness quality benchmark", () => {
     expect(classifyRisk(".github/workflows/release.yml")).toBe("deployment");
     expect(classifyRisk("src/api/contract.ts")).toBe("public-contract");
     expect(classifyRisk("src/core/runtime.ts")).toBe("shared-core");
+  });
+
+  it("surfaces rejected AI authorship and produces review-only risk candidates", () => {
+    const facts = snapshot("# Repository instructions\n\n## Before editing\n\nInspect `src/core.ts`.\n\n## Operating rules\n\nPreserve contracts.\n\n## Core boundaries\n\n`src/core.ts`\n\n## Change workflows\n\nEdit `src/core.ts` and update tests.\n");
+    facts.generation = {
+      status: "deterministic-fallback",
+      generatedAt: new Date().toISOString(),
+      reason: "Invalid reference scope",
+      activatedGates: [],
+    };
+    const quality = assessHarnessQuality(facts);
+    expect(quality.score).toBe(60);
+    expect(quality.checks).toContainEqual(expect.objectContaining({ id: "ai-authoring", passed: false }));
+    expect(criticalCandidates([
+      "src/api/middlewares/security.py",
+      "src/api/services/experiment_repository.py",
+      "src/api/routes/experiments.py",
+    ])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ risk: "security", path: "src/api/middlewares/security.py" }),
+      expect.objectContaining({ risk: "persistence", path: "src/api/services/experiment_repository.py" }),
+      expect.objectContaining({ risk: "public-contract", path: "src/api/routes/experiments.py" }),
+    ]));
   });
 
   it("creates scoped deterministic references instead of expanding the root document", () => {

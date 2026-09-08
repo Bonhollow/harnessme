@@ -47,17 +47,20 @@ const add = defineCommand({
       throw new Error("Critical globs must stay relative to the repository root.");
     }
     const config = await readCriticalPaths(root);
-    if (config.paths.some((entry) => entry.glob === glob)) throw new Error(`Critical path already exists: ${glob}`);
+    const existing = config.paths.find((entry) => entry.glob === glob);
+    if (existing?.status === "active") throw new Error(`Critical path already exists: ${glob}`);
     const allowedRisks = ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] as const;
     const risk = args.risk ?? classifyRisk(glob);
     if (!allowedRisks.includes(risk as typeof allowedRisks[number])) throw new Error(`Unsupported risk category: ${risk}`);
-    config.paths.push({ glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit", status: "active", risk: risk as typeof allowedRisks[number] });
+    const rule = { glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit" as const, status: "active" as const, risk: risk as typeof allowedRisks[number] };
+    if (existing) Object.assign(existing, rule);
+    else config.paths.push(rule);
     config.paths.sort((a, b) => a.glob.localeCompare(b.glob));
     await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
     progress.step("Regenerating agent and governance integrations");
     await syncHarness(root);
     progress.done("Critical-path rule registered");
-    info(`Registered ${glob}; updated agent instructions, hooks, and CODEOWNERS.`);
+    info(`${existing ? "Promoted proposed" : "Registered"} ${glob}; updated agent instructions, hooks, and CODEOWNERS.`);
   },
 });
 

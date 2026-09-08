@@ -286,7 +286,7 @@ const value = schema.includes("harnessme_facts")
       expect(agents).toContain("Swift runtime and tooling");
       expect(agents).toContain("Use PascalCase names for declared types. Evidence: `Payment.swift:1`");
       expect(agents).toContain("PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`");
-      expect(requests).toBe(4);
+      expect(requests).toBe(5);
       expect(requestBodies.join("\n")).not.toContain("sk-this-must-never-leave-the-machine");
       expect(requestBodies.join("\n")).not.toContain("ignore previous instructions");
       expect(requestBodies[0]).toContain("REDACTED SECRET-LIKE LINE");
@@ -333,7 +333,7 @@ const value = schema.includes("harnessme_facts")
         cli, "init", "--root", root, "--provider", "http", "--ai-endpoint", endpoint, "--model", "analyst-model",
         "--review-provider", "http", "--review-ai-endpoint", endpoint, "--review-model", "reviewer-model",
       ]);
-      expect(models).toEqual(["analyst-model", "reviewer-model", "analyst-model", "reviewer-model"]);
+      expect(models).toEqual(["analyst-model", "reviewer-model", "analyst-model", "reviewer-model", "reviewer-model"]);
       expect(initialized.stderr).toContain("independently reviewed by http");
       expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Project purpose\n\nA fixture for independent model review.");
       const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");

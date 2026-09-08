@@ -14,3 +14,4 @@ export {
   type AuthoredHarnessResult,
 } from "./harness-author.js";
 export * from "./documentation.js";
+export * from "./critical-candidates.js";

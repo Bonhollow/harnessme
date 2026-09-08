@@ -7,6 +7,7 @@ import {
   EvidenceSchema,
   HarnessConfigSchema,
   HarnessQualitySchema,
+  HarnessGenerationSchema,
   ReferencePackSchema,
   StackSchema,
   VerifiedChangesSchema,
@@ -17,6 +18,7 @@ import {
   type Evidence,
   type HarnessConfig,
   type HarnessQuality,
+  type HarnessGeneration,
   type ReferencePack,
   type Stack,
   type VerifiedChanges,
@@ -36,6 +38,7 @@ export interface FactsSnapshot {
   referencePack?: ReferencePack;
   quality?: HarnessQuality;
   documentationConflicts?: DocumentationConflict[];
+  generation?: HarnessGeneration;
 }
 
 export const harnessDir = (root: string): string => join(root, ".harnessme");
@@ -72,6 +75,7 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
   const referencesPath = join(facts, "references.json");
   const qualityPath = join(facts, "quality.json");
   const conflictsPath = join(facts, "conflicts.json");
+  const generationPath = join(facts, "harness-generation.json");
   const snapshot = {
     config: await readYaml(join(base, "harnessme.yaml"), HarnessConfigSchema),
     conventions: await readYaml(join(facts, "conventions.yaml"), ConventionsSchema),
@@ -87,6 +91,7 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
     referencePack: await exists(referencesPath) ? await readJson(referencesPath, ReferencePackSchema) : undefined,
     quality: await exists(qualityPath) ? await readJson(qualityPath, HarnessQualitySchema) : undefined,
     documentationConflicts: await exists(conflictsPath) ? await readJson(conflictsPath, z.array(DocumentationConflictSchema)) : undefined,
+    generation: await exists(generationPath) ? await readJson(generationPath, HarnessGenerationSchema) : undefined,
   };
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const fact of snapshot.conventions.facts) {

@@ -222,7 +222,7 @@ describe("AI harness authoring", () => {
 
     expect(result.markdown).toContain("## Repository map");
     expect(result.comparison).toContain("Restored");
-    expect(requests).toBe(3);
+    expect(requests).toBe(4);
     const gateItems = (draftSchema?.properties as Record<string, { items?: { required?: string[]; properties?: Record<string, unknown> } }> | undefined)?.gates?.items;
     expect(gateItems?.required).toEqual(["path", "reason", "risk"]);
     expect(gateItems?.properties?.risk).toEqual({
@@ -305,6 +305,6 @@ describe("AI harness authoring", () => {
     expect(result.markdown).toContain("`docs/CORE.md`");
     expect(result.references).toEqual(expect.arrayContaining([expect.objectContaining({ slug: "core", scope: "src/**" })]));
     expect(result.markdown).not.toContain("100%");
-    expect(requests).toBe(3);
+    expect(requests).toBe(4);
   });
 });

@@ -80,6 +80,7 @@ const HarnessConfigObjectSchema = z.object({
       exclude: z.array(z.string().min(1)).default([]),
     }).optional(),
     review: InferenceConfigSchema.optional(),
+    councilSize: z.number().int().min(1).max(3).optional(),
   }),
   distribution: z.object({
     backend: z.enum(["ruler", "native"]).default("ruler"),
@@ -172,10 +173,18 @@ export const HarnessQualitySchema = z.object({
   })),
 });
 
+export const HarnessGenerationSchema = z.object({
+  status: z.enum(["ai-reviewed", "deterministic", "deterministic-fallback"]),
+  generatedAt: z.string().datetime(),
+  reason: z.string().optional(),
+  activatedGates: z.array(z.unknown()).default([]),
+}).passthrough();
+
 export type ReferenceDocument = z.infer<typeof ReferenceDocumentSchema>;
 export type ReferencePack = z.infer<typeof ReferencePackSchema>;
 export type DocumentationConflict = z.infer<typeof DocumentationConflictSchema>;
 export type HarnessQuality = z.infer<typeof HarnessQualitySchema>;
+export type HarnessGeneration = z.infer<typeof HarnessGenerationSchema>;
 
 export const DEFAULT_EXCLUDES = [
   "**/.git/**",

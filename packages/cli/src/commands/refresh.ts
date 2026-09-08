@@ -13,7 +13,7 @@ import {
   writeYaml,
   type FactsSnapshot,
 } from "@harnessme/core";
-import { analyzeProject, authorHarnessWithAi, AuthoredHarnessValidationError } from "@harnessme/analyzers";
+import { analyzeProject, authorHarnessWithAi, AuthoredHarnessValidationError, criticalCandidates } from "@harnessme/analyzers";
 import { referenceDocuments, renderAgentsMd, syncHarness } from "@harnessme/renderers";
 import { createProgress, disabled, info, warn } from "../output.js";
 import { projectRoot } from "../project.js";
@@ -70,10 +70,23 @@ export default defineCommand({
           risk: classifyRisk(candidate.path),
         });
       }
+      for (const candidate of criticalCandidates(analysis.sourceFiles)) {
+        if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
+        criticalPaths.paths.push({
+          glob: candidate.path,
+          reason: candidate.reason,
+          approvers: defaultApprovers,
+          source: "heuristic",
+          status: "proposed",
+          risk: candidate.risk,
+        });
+      }
     }
     previous.config.languages = analysis.stack.languages.map((language) => language.name);
 
     let authoredResult: Awaited<ReturnType<typeof authorHarnessWithAi>> | undefined;
+    let authoringFailure: string | undefined;
+    const preservePreviousAuthoring = Boolean(previous.authoredInstructions && previous.referencePack);
     if (previous.config.analysis.aiFallback && !args.deterministic) {
       const snapshot: FactsSnapshot = {
         config: previous.config,
@@ -93,6 +106,7 @@ export default defineCommand({
           deterministicBaseline: renderAgentsMd(snapshot),
           inference: previous.config.analysis.aiFallback,
           review: previous.config.analysis.review,
+          councilSize: previous.config.analysis.councilSize,
           previousHarness: previous.authoredInstructions,
           previousReferences: previous.referencePack?.documents,
           onPhase: (message) => progress.step(message),
@@ -117,7 +131,8 @@ export default defineCommand({
         }
       } catch (error) {
         if (!(error instanceof AuthoredHarnessValidationError)) throw error;
-        disabled("AI-authored refresh rejected after repair; using refreshed deterministic instructions");
+        authoringFailure = error.message;
+        disabled(`AI-authored refresh rejected after repair; ${preservePreviousAuthoring ? "preserving the last validated AI harness" : "using refreshed deterministic instructions"}`);
         warn(error.message);
       }
     } else {
@@ -146,11 +161,14 @@ export default defineCommand({
         activatedGates: authoredResult.gates,
       });
     } else {
-      await removeIfPresent(join(base, "facts", "AGENTS.authored.md"));
-      await removeIfPresent(join(base, "facts", "references.json"));
+      if (!(authoringFailure && preservePreviousAuthoring)) {
+        await removeIfPresent(join(base, "facts", "AGENTS.authored.md"));
+        await removeIfPresent(join(base, "facts", "references.json"));
+      }
       await writeJson(join(base, "facts", "harness-generation.json"), {
-        status: "deterministic",
+        status: authoringFailure ? "deterministic-fallback" : "deterministic",
         generatedAt: new Date().toISOString(),
+        ...(authoringFailure ? { reason: authoringFailure } : {}),
         activatedGates: [],
       });
     }

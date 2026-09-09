@@ -35,9 +35,11 @@
   <text x="126" y="466" class="mono green">Quality   100/100</text><text x="126" y="494" class="mono green">Gates     4 active · 1 proposed</text>
   <text x="126" y="535" class="mono cyan">Actions</text><text x="126" y="560" class="mono text">› Refresh with AI     Quality report</text>
   <rect x="548" y="378" width="1148" height="198" rx="8" class="panel"/>
-  <text x="572" y="408" class="mono cyan">Live AGENTS.md preview</text>
-  <text x="572" y="441" class="mono text"># Repository operating contract</text><text x="572" y="468" class="mono muted">Read the applicable module guide before editing. Verify with npm test.</text>
-  <text x="572" y="495" class="mono muted">Protected paths require an explicit developer confirmation and a review record.</text>
+  <text x="572" y="408" class="mono cyan">Generated harness documents</text>
+  <text x="572" y="435" class="mono cyan">Document 4/18   ‹ Critical paths   [Guide · authentication]   Pack · architecture ›</text>
+  <text x="572" y="460" class="mono muted">.harnessme/references/authentication.md</text>
+  <text x="572" y="490" class="mono text"># Authentication and Corey context</text><text x="572" y="516" class="mono muted">Read this guide before changing browser credentials, API authentication, or outbound resolution.</text>
+  <text x="572" y="550" class="mono muted">[/]/Tab switch documents</text>
 
   <!-- 2 Guided Configuration -->
   <text x="104" y="684" class="title" fill="#67e8f9" font-size="24">2 · Guided configuration</text>

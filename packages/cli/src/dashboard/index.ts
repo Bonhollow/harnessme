@@ -148,7 +148,7 @@ async function confirmRemoval(): Promise<boolean> {
 async function dashboardSelection(root: string, actions: Action[]): Promise<Action | undefined> {
   const renderer: CliRenderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
   const state = await loadDashboardState(root);
-  const select = buildDashboard(renderer, state, actions.map((action, index) => ({
+  const dashboard = buildDashboard(renderer, state, actions.map((action, index) => ({
     name: action.label,
     description: action.description,
     value: index,
@@ -161,9 +161,11 @@ async function dashboardSelection(root: string, actions: Action[]): Promise<Acti
       renderer.destroy();
       resolve(action);
     };
-    select.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option: SelectOption) => finish(actions[Number(option.value)]));
+    dashboard.select.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option: SelectOption) => finish(actions[Number(option.value)]));
     renderer.keyInput.on("keypress", (key) => {
       if (key.name === "escape" || key.name === "q" || (key.ctrl && key.name === "c")) finish();
+      else if (key.name === "[" || key.name === "left") dashboard.cycleDocument(-1);
+      else if (key.name === "]" || key.name === "right" || key.name === "tab") dashboard.cycleDocument(1);
     });
   });
 }

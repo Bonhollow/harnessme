@@ -60,7 +60,12 @@ export function buildSelectionScreen(
   return select;
 }
 
-export function buildDashboard(renderer: CliRenderer, state: DashboardState, options: SelectOption[]): SelectRenderable {
+export interface DashboardView {
+  select: SelectRenderable;
+  cycleDocument: (direction: 1 | -1) => void;
+}
+
+export function buildDashboard(renderer: CliRenderer, state: DashboardState, options: SelectOption[]): DashboardView {
   const root = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%", backgroundColor: COLORS.background });
   renderer.root.add(root);
   const header = new BoxRenderable(renderer, { height: 4, backgroundColor: COLORS.blue, paddingX: 2, flexDirection: "column" });
@@ -105,14 +110,34 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
   });
   sidebar.add(select);
 
-  const preview = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Live AGENTS.md preview ", padding: 1, overflow: "hidden" });
+  const preview = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Generated harness documents ", padding: 1, flexDirection: "column", overflow: "hidden" });
   body.add(preview);
-  addText(renderer, preview, state.preview.join("\n"), { width: "100%", height: "100%", fg: COLORS.text });
+  const tabs = addText(renderer, preview, "", { height: 1, fg: COLORS.accent, truncate: true });
+  const documentPath = addText(renderer, preview, "", { height: 1, fg: COLORS.muted, truncate: true });
+  const documentPreview = addText(renderer, preview, "", { width: "100%", flexGrow: 1, fg: COLORS.text, wrapMode: "word" });
+  let documentIndex = 0;
+  const renderDocument = (): void => {
+    const document = state.documents[documentIndex];
+    if (!document) return;
+    const previous = state.documents[(documentIndex - 1 + state.documents.length) % state.documents.length];
+    const next = state.documents[(documentIndex + 1) % state.documents.length];
+    tabs.content = `Document ${documentIndex + 1}/${state.documents.length}   ‹ ${previous?.label ?? ""}   [${document.label}]   ${next?.label ?? ""} ›`;
+    documentPath.content = document.path || "Select Initialize to create the generated document set.";
+    documentPreview.content = document.content.join("\n");
+    renderer.requestRender();
+  };
+  renderDocument();
   const footer = new BoxRenderable(renderer, { height: 1, paddingX: 2 });
   root.add(footer);
-  addText(renderer, footer, "↑/↓ navigate   Enter select   Esc/q exit   ·   Quality report opens an actionable health view", { height: 1, fg: COLORS.muted, truncate: true });
+  addText(renderer, footer, "↑/↓ navigate   Enter select   [/]/Tab switch documents   Esc/q exit", { height: 1, fg: COLORS.muted, truncate: true });
   select.focus();
-  return select;
+  return {
+    select,
+    cycleDocument(direction: 1 | -1): void {
+      documentIndex = (documentIndex + direction + state.documents.length) % state.documents.length;
+      renderDocument();
+    },
+  };
 }
 
 export function buildQualityReportScreen(renderer: CliRenderer, report: QualityReport): void {

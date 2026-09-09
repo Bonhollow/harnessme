@@ -29,7 +29,7 @@ harnessme
 <p align="center">
   <img src="assets/dashboard-overview.png" alt="HarnessME dashboard walkthrough showing all five full-screen views" width="900">
   <br>
-  <em>The dashboard: repository control, guided configuration, live operation progress, quality intelligence, and critical-gate management.</em>
+  <em>The dashboard: repository control with generated-document tabs, guided configuration, live operation progress, quality intelligence, and critical-gate management.</em>
 </p>
 
 ## Use
@@ -38,7 +38,7 @@ harnessme
 
 Run `harnessme` from a repository root at any time. The dashboard is the default interface and keeps the whole lifecycle in one place:
 
-1. **Dashboard** — inspect harness health, provider/model settings, safety-gate counts, and a live `AGENTS.md` preview.
+1. **Dashboard** — inspect harness health, provider/model settings, safety-gate counts, and every generated harness document. Use `[` / `]` or Tab to switch the root contract, scoped guides, agent pack, critical policy, and nested module contracts.
 2. **Guided configuration** — choose a provider, model, Codex thinking level, review depth, and optional context without remembering flags.
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
 4. **Quality intelligence** — see each quality dimension, documentation conflicts, and the next best action.

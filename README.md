@@ -21,16 +21,41 @@ Requires Node.js 26.4 or newer on Windows, macOS, or Linux.
 ```bash
 npm install -g harnessme
 cd your-repository
-harnessme init
+harnessme
 ```
 
-`init` selects an available signed-in AI framework, lets you choose a model, analyzes the repository, and writes the harness. Run `harnessme` with no subcommand afterward to open the dashboard.
+`harnessme` opens the interactive dashboard. On a repository without a harness, select **Initialize**; it guides you through provider, model, thinking level, review depth, and optional project context before it writes anything.
 
 <p align="center">
-  <img src="assets/dashboard.png" alt="HarnessME quality intelligence dashboard" width="800">
+  <img src="assets/dashboard-overview.png" alt="HarnessME dashboard walkthrough showing all five full-screen views" width="900">
   <br>
-  <em>The terminal dashboard turns quality checks into an actionable readiness view.</em>
+  <em>The dashboard: repository control, guided configuration, live operation progress, quality intelligence, and critical-gate management.</em>
 </p>
+
+## Use
+
+### Dashboard — recommended
+
+Run `harnessme` from a repository root at any time. The dashboard is the default interface and keeps the whole lifecycle in one place:
+
+1. **Dashboard** — inspect harness health, provider/model settings, safety-gate counts, and a live `AGENTS.md` preview.
+2. **Guided configuration** — choose a provider, model, Codex thinking level, review depth, and optional context without remembering flags.
+3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
+4. **Quality intelligence** — see each quality dimension, documentation conflicts, and the next best action.
+5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
+
+### CLI commands
+
+Use commands when scripting, running CI, or when you already know the operation you need:
+
+```bash
+harnessme init             # create a harness non-interactively or with prompts
+harnessme refresh          # update it after repository changes
+harnessme quality          # report quality dimensions and next best action
+harnessme check --ci       # fail CI when repository facts have drifted
+```
+
+The complete command and critical-change workflow reference is available further down this README.
 
 ## What you get
 
@@ -40,36 +65,11 @@ harnessme init
 - Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
 - A dashboard and `harnessme quality` scorecard that show what is healthy, what is missing, and the next best action.
 
-## Install
+## Requirements
 
-Requires Node.js 26.4 or newer on Windows, macOS, or Linux. The dashboard automatically enables Node's experimental FFI flag required by OpenTUI.
-
-```bash
-npm install -g harnessme
-harnessme --version
-```
-
-After this, run every command directly as `harnessme …` from the repository you want to analyze.
+HarnessME requires Node.js 26.4 or newer on Windows, macOS, or Linux. The dashboard automatically enables Node's experimental FFI flag required by OpenTUI. After installation, run every command directly as `harnessme …` from the repository you want to analyze.
 
 For model-assisted generation, install and sign in to at least one supported framework CLI: Codex, Claude Code, or Cursor. Use `--deterministic` when you want a fully local run without model inference.
-
-
-
-## Use
-
-Run `harnessme` without a subcommand to open the full-screen terminal dashboard. It shows the current mode, provider, model, thinking level, quality score, gate counts, scoped-guide count, and a live preview of `AGENTS.md`. The **Quality report** opens a focused scorecard for every quality dimension, readiness context, and the next best action when something needs attention. Use the dashboard to initialize or refresh the harness, switch inference provider/model, synchronize integrations, or remove HarnessME state. Guided initialization selects provider, model, optional Codex thinking level, review depth, optional project context, and confirms the resulting plan before writing; refresh also offers an optional context field. Long-running operations show their current phase and a live output panel. Use the context field for domain rules, architecture constraints, team practices, or known risks that code cannot reveal. The Critical Gate Manager provides checkbox-style selection for multiple paths, bulk activation/removal, and a three-step form for adding a custom protected path. Arrow keys navigate, Enter or Space toggles a gate, `a` selects all, `s` applies a gate plan, `n` adds a gate, and Escape or `q` exits.
-
-Initialize HarnessME from the root of an existing repository:
-
-```bash
-harnessme init
-```
-
-By default, `init` resolves the first available signed-in inference CLI and writes integrations for every supported agent framework. In an interactive terminal it then lists the provider's available models and asks you to select one; `--model` makes that choice non-interactively. If no supported AI CLI is available, `auto` stops with a clear error; use `--deterministic` only when you explicitly want local-only generation. The CLI prints `✓` or `✗` status lines showing the effective AI, review, and deterministic modes. The `--provider` option selects inference; it does not limit generated files. Use `--targets codex,claude-code` only when you intentionally want a smaller output set.
-
-This creates the facts store in `.harnessme/`, a concise root `AGENTS.md`, a navigable architecture and critical-change agent pack under `.harnessme/agent-pack/`, concern guides under `.harnessme/references/`, and detailed nested `AGENTS.md` files beside the modules they govern. It also creates provider files, a harness-quality report, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
-
-Long-running commands display a phase-by-phase progress bar describing the current operation. When output is redirected or running in CI, the same updates are emitted as stable `progress:` log lines.
 
 <details>
 <summary><strong>How HarnessME creates and reviews the harness</strong></summary>
@@ -137,17 +137,8 @@ After the repository changes, run `harnessme refresh`. It reuses the provider, m
 
 </details>
 
-## Everyday commands
-
-```bash
-harnessme                  # open the interactive dashboard
-harnessme refresh          # update the harness after repository changes
-harnessme quality          # see quality dimensions and next best action
-harnessme check --ci       # fail CI when facts have drifted
-```
-
 <details>
-<summary><strong>Full command reference and critical-change workflow</strong></summary>
+<summary><strong>Use — full command reference and critical-change workflow</strong></summary>
 
 ## Command reference
 
@@ -241,14 +232,6 @@ npm run lint
 npm test
 npm run test:package
 ```
-
-## Publishing
-
-Releases are published through `.github/workflows/release.yml` using npm trusted publishing and provenance. Before the first automated release, configure this GitHub repository and the `release.yml` workflow as a trusted publisher in the npm package settings, enable two-factor authentication on maintainer accounts, and create the protected GitHub environment named `npm`.
-
-Set the version in `package.json`, commit it, create a matching tag such as `v0.4.0`, and publish a GitHub Release from that tag. The workflow rejects a tag that does not match the package version, runs the full test and packaged-install suite, then publishes with provenance.
-
-
 
 ## License
 

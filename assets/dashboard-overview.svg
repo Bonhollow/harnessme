@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1500" viewBox="0 0 1800 1500" role="img" aria-labelledby="title desc">
+  <title id="title">HarnessME dashboard walkthrough</title>
+  <desc id="desc">A visual walkthrough of the Dashboard, Guided Configuration, Operation Progress, Quality Intelligence, and Critical Gate Manager screens.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1800" y2="1500" gradientUnits="userSpaceOnUse"><stop stop-color="#020617"/><stop offset="1" stop-color="#172554"/></linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#075985"/><stop offset="1" stop-color="#1D4ED8"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity=".45"/></filter>
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .title { font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 700; }
+      .frame { fill: #0b1020; stroke: #334155; stroke-width: 2; }
+      .panel { fill: #0f172a; stroke: #334155; stroke-width: 1.5; }
+      .bar { fill: url(#bar); }
+      .label { fill: #e2e8f0; font-size: 25px; font-weight: 700; }
+      .muted { fill: #94a3b8; font-size: 16px; }
+      .text { fill: #e2e8f0; font-size: 16px; }
+      .green { fill: #4ade80; font-size: 16px; }
+      .cyan { fill: #67e8f9; font-size: 16px; }
+    </style>
+  </defs>
+  <rect width="1800" height="1500" fill="url(#canvas)"/>
+  <text x="900" y="74" text-anchor="middle" class="title" fill="#f8fafc" font-size="42">HarnessME terminal workflow</text>
+  <text x="900" y="112" text-anchor="middle" class="mono" fill="#94a3b8" font-size="20">Open with <tspan fill="#67e8f9">harnessme</tspan> and manage the repository harness without leaving the terminal.</text>
+
+  <!-- 1 Dashboard -->
+  <text x="104" y="174" class="title" fill="#67e8f9" font-size="24">1 · Dashboard</text>
+  <rect x="80" y="196" width="1640" height="410" rx="16" class="frame" filter="url(#shadow)"/>
+  <rect x="80" y="196" width="1640" height="45" rx="16" fill="#111827"/>
+  <circle cx="112" cy="219" r="7" fill="#fb7185"/><circle cx="137" cy="219" r="7" fill="#fbbf24"/><circle cx="162" cy="219" r="7" fill="#4ade80"/>
+  <rect x="104" y="266" width="1592" height="92" rx="8" class="bar"/>
+  <text x="130" y="300" class="mono" fill="#fff" font-size="22">HarnessME  Repository Agent Control Center</text>
+  <text x="130" y="330" class="mono" fill="#bae6fd" font-size="16">my-repository · Governance, safety gates, and harness health in one place</text>
+  <rect x="104" y="378" width="420" height="198" rx="8" class="panel"/>
+  <text x="126" y="408" class="mono cyan">Health</text><text x="126" y="438" class="mono green">● Harness installed</text>
+  <text x="126" y="466" class="mono green">Quality   100/100</text><text x="126" y="494" class="mono green">Gates     4 active · 1 proposed</text>
+  <text x="126" y="535" class="mono cyan">Actions</text><text x="126" y="560" class="mono text">› Refresh with AI     Quality report</text>
+  <rect x="548" y="378" width="1148" height="198" rx="8" class="panel"/>
+  <text x="572" y="408" class="mono cyan">Live AGENTS.md preview</text>
+  <text x="572" y="441" class="mono text"># Repository operating contract</text><text x="572" y="468" class="mono muted">Read the applicable module guide before editing. Verify with npm test.</text>
+  <text x="572" y="495" class="mono muted">Protected paths require an explicit developer confirmation and a review record.</text>
+
+  <!-- 2 Guided Configuration -->
+  <text x="104" y="684" class="title" fill="#67e8f9" font-size="24">2 · Guided configuration</text>
+  <rect x="80" y="706" width="790" height="328" rx="16" class="frame" filter="url(#shadow)"/>
+  <rect x="104" y="732" width="742" height="73" rx="8" class="bar"/>
+  <text x="126" y="762" class="mono" fill="#bae6fd" font-size="16">HarnessME · Guided configuration</text><text x="126" y="788" class="mono" fill="#fff" font-size="19">Choose an inference provider</text>
+  <rect x="104" y="826" width="742" height="176" rx="8" class="panel"/>
+  <text x="128" y="858" class="mono cyan">Choose an option</text>
+  <rect x="124" y="874" width="700" height="31" rx="4" fill="#164e63"/><text x="142" y="896" class="mono" fill="#fff" font-size="16">› Codex     Use the signed-in Codex CLI</text>
+  <text x="142" y="932" class="mono text">  Claude Code     Use the signed-in Claude CLI</text><text x="142" y="962" class="mono text">  Cursor          Use the signed-in Cursor CLI</text>
+  <text x="126" y="1019" class="mono muted">↑/↓ navigate · Enter select · Esc/q back</text>
+
+  <!-- 3 Operation -->
+  <text x="930" y="684" class="title" fill="#67e8f9" font-size="24">3 · Operation progress</text>
+  <rect x="910" y="706" width="810" height="328" rx="16" class="frame" filter="url(#shadow)"/>
+  <rect x="934" y="732" width="762" height="73" rx="8" class="bar"/>
+  <text x="956" y="762" class="mono" fill="#bae6fd" font-size="16">HarnessME · Operation in progress</text><text x="956" y="788" class="mono" fill="#fff" font-size="19">Initialize</text>
+  <text x="1285" y="788" class="mono" fill="#e0f2fe" font-size="16">●●●●●●●●●●●●●●●●●● Complete</text>
+  <rect x="934" y="826" width="762" height="176" rx="8" class="panel"/>
+  <text x="958" y="858" class="mono cyan">Operation output</text><text x="958" y="891" class="mono green">✓ [1/5] Repository analysis complete</text>
+  <text x="958" y="920" class="mono green">✓ [2/5] Evidence reviewed by AI council</text><text x="958" y="949" class="mono green">✓ [3/5] AGENTS.md and scoped guides written</text>
+  <text x="958" y="978" class="mono green">✓ [5/5] Safety gates and integrations synchronized</text>
+
+  <!-- 4 Quality -->
+  <text x="104" y="1112" class="title" fill="#67e8f9" font-size="24">4 · Quality intelligence</text>
+  <rect x="80" y="1134" width="790" height="286" rx="16" class="frame" filter="url(#shadow)"/>
+  <rect x="104" y="1160" width="742" height="77" rx="8" class="bar"/>
+  <text x="126" y="1191" class="mono" fill="#bae6fd" font-size="16">HarnessME · Quality intelligence</text><text x="126" y="1220" class="mono green" font-size="25">100/100  Ready to work</text>
+  <rect x="104" y="1258" width="460" height="138" rx="8" class="panel"/><rect x="584" y="1258" width="262" height="138" rx="8" class="panel"/>
+  <text x="126" y="1287" class="mono cyan">Quality dimensions</text><text x="126" y="1317" class="mono green">✓ Validation commands verified</text><text x="126" y="1347" class="mono green">✓ Core boundaries identified</text><text x="126" y="1377" class="mono green">✓ Scoped guides are actionable</text>
+  <text x="606" y="1287" class="mono cyan">Next best action</text><text x="606" y="1317" class="mono green">• Harness is ready.</text><text x="606" y="1347" class="mono text">6 guides · 4 gates</text>
+
+  <!-- 5 Gates -->
+  <text x="930" y="1112" class="title" fill="#67e8f9" font-size="24">5 · Critical Gate Manager</text>
+  <rect x="910" y="1134" width="810" height="286" rx="16" class="frame" filter="url(#shadow)"/>
+  <rect x="934" y="1160" width="762" height="56" rx="8" class="bar"/>
+  <text x="956" y="1192" class="mono" fill="#fff" font-size="19">HarnessME  Critical Gate Manager</text>
+  <rect x="934" y="1237" width="450" height="159" rx="8" class="panel"/><rect x="1404" y="1237" width="292" height="159" rx="8" class="panel"/>
+  <text x="956" y="1267" class="mono cyan">Gates</text><text x="956" y="1298" class="mono text">☑ src/payments/**</text><text x="956" y="1328" class="mono text">☐ src/auth/**</text><text x="956" y="1358" class="mono text">☐ packages/core/**</text>
+  <text x="1426" y="1267" class="mono cyan">Selection</text><text x="1426" y="1298" class="mono green">ACTIVE — protected</text><text x="1426" y="1328" class="mono text">Risk: billing</text><text x="1426" y="1358" class="mono text">Approvers: @developer</text>
+</svg>

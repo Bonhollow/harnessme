@@ -4,13 +4,14 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
-import { readFacts } from "@harnessme/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import qualityCommand from "../commands/quality.js";
 import syncCommand from "../commands/sync.js";
-import { activate as activateCriticalCommand, list as listCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
+import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
 import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
+import { manageGates } from "./gates.js";
+import { collectProjectDetails } from "./details.js";
 import { loadDashboardState } from "./state.js";
 import { buildDashboard, buildOperationScreen, buildSelectionScreen } from "./view.js";
 
@@ -55,27 +56,71 @@ async function chooseInference(): Promise<InferenceChoice | undefined> {
   if (!selected) return undefined;
   if (selected.value === "deterministic") return { deterministic: true };
   const resolved = await resolveInferenceChoice(selected.value as "auto" | "codex" | "claude-code" | "cursor");
-  if (!resolved.models.length) return { deterministic: false, provider: resolved.provider };
-  const model = await selectOption("Model", `Choose the ${resolved.provider} model.`, [
+  if (!resolved.models.length) return chooseThinkingLevel({ deterministic: false, provider: resolved.provider });
+  const model = await selectOption("Model · 2/4", `Choose the ${resolved.provider} model.`, [
     ...resolved.models.map((item) => ({ name: item.label, description: item.id, value: item.id })),
     { name: "Provider default", description: "Let the framework select its default model.", value: undefined },
   ]);
   if (!model) return undefined;
-  return { deterministic: false, provider: resolved.provider, model: model.value as string | undefined };
+  return chooseThinkingLevel({ deterministic: false, provider: resolved.provider, model: model.value as string | undefined });
+}
+
+async function chooseThinkingLevel(choice: InferenceChoice): Promise<InferenceChoice | undefined> {
+  if (choice.provider !== "codex") return choice;
+  const level = await selectOption("Thinking level · 3/4", "Choose how deeply Codex reasons before authoring and reviewing the harness. Higher effort may take longer.", [
+    { name: "Balanced (recommended)", description: "Strong reasoning for repository architecture without unnecessary latency.", value: "medium" },
+    { name: "Fast", description: "Lower latency for small or straightforward repositories.", value: "low" },
+    { name: "Deep", description: "More deliberate architecture and safety analysis for complex repositories.", value: "high" },
+  ]);
+  return level ? { ...choice, reasoningEffort: level.value as "low" | "medium" | "high" } : undefined;
+}
+
+interface InitSettings extends InferenceChoice { councilSize: string; details?: string }
+
+async function chooseInitSettings(): Promise<InitSettings | undefined> {
+  const choice = await chooseInference();
+  if (!choice) return undefined;
+  const council = choice.deterministic ? undefined : await selectOption(
+    "Harness review · 4/5",
+    "Choose how many independent AI reviewers compare the authored harness against repository evidence.",
+    [
+      { name: "Balanced review (recommended)", description: "Two independent review candidates; a strong default for most repositories.", value: "2" },
+      { name: "Fast review", description: "One reviewer candidate; lower latency and inference usage.", value: "1" },
+      { name: "Maximum review", description: "Three independent candidates; strongest challenge of architecture and gate claims.", value: "3" },
+    ],
+  );
+  if (!choice.deterministic && !council) return undefined;
+  const councilSize = choice.deterministic ? "1" : String(council?.value);
+  const details = await collectProjectDetails("Project details · optional · 5/5");
+  if (details === null) return undefined;
+  const summary = choice.deterministic
+    ? "Local deterministic analysis only. No model inference will run."
+    : `AI inference: ${choice.provider ?? "auto"} / ${choice.model ?? "provider default"}\nThinking: ${choice.reasoningEffort ?? "provider default"}\nReview council: ${councilSize} candidate(s)`;
+  const confirmed = await selectOption(
+    "Ready to create the harness",
+    `${summary}\n\nThe dashboard will show real-time analysis, authorship, review, gate detection, and rendering progress.`,
+    [
+      { name: "Start initialization", description: "Create the governed agent harness in this repository.", value: true },
+      { name: "Back", description: "Return to the dashboard without changing the repository.", value: false },
+    ],
+  );
+  return confirmed?.value === true ? { ...choice, councilSize, details } : undefined;
 }
 
 async function showOperation(title: string, operation: (onOutput: OperationOutput) => Promise<void>): Promise<void> {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
   const screen = buildOperationScreen(renderer, title);
   let message = "Operation complete. Press any key to return to the dashboard.";
+  let successful = true;
   try {
     await operation(screen.append);
     screen.append(`\n✓ ${message}\n`);
   } catch (error) {
+    successful = false;
     message = "Operation failed. Press any key to return to the dashboard.";
     screen.append(`\n✗ ${error instanceof Error ? error.message : String(error)}\n`);
   }
-  screen.finish(message);
+  screen.finish(message, successful);
   await new Promise<void>((resolve) => renderer.keyInput.once("keypress", () => resolve()));
   renderer.destroy();
 }
@@ -90,32 +135,6 @@ async function confirmRemoval(): Promise<boolean> {
     ],
   );
   return selected?.value === true;
-}
-
-async function chooseGate(root: string, status: "active" | "proposed", verb: "activate" | "remove"): Promise<string | undefined> {
-  const facts = await readFacts(root);
-  const gates = facts.criticalPaths.paths.filter((gate) => gate.status === status);
-  if (!gates.length) throw new Error(`No ${status} critical gates are available to ${verb}.`);
-  const selected = await selectOption(
-    `${verb === "activate" ? "Activate" : "Remove"} critical gate`,
-    verb === "activate"
-      ? "AI-recognized candidates become protected: agents must ask before editing them."
-      : "Removing this protection lets agents edit the path without the critical-change gate.",
-    gates.map((gate) => ({ name: gate.glob, description: `${gate.risk ?? "other"}: ${gate.reason}`, value: gate.glob })),
-  );
-  if (!selected) return undefined;
-  if (verb === "remove") {
-    const confirmed = await selectOption(
-      `Remove gate for ${selected.value as string}?`,
-      "This removes the pre-edit confirmation and Git approval requirement for this path.",
-      [
-        { name: "Cancel", description: "Keep the critical protection.", value: false },
-        { name: "Remove gate", description: "Remove this path from critical protection.", value: true },
-      ],
-    );
-    if (confirmed?.value !== true) return undefined;
-  }
-  return selected.value as string;
 }
 
 async function dashboardSelection(root: string, actions: Action[]): Promise<Action | undefined> {
@@ -146,8 +165,14 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
-      { label: "Refresh with AI", description: "Use the configured provider and model.", prepare: async () => async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false }, onOutput) },
-      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", prepare: async () => async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: true }, onOutput) },
+      { label: "Refresh with AI", description: "Use the configured provider/model and optionally add project context.", prepare: async () => {
+        const details = await collectProjectDetails("Refresh details · optional");
+        return details === null ? undefined : async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false, details }, onOutput);
+      } },
+      { label: "Refresh deterministically", description: "Run without model inference; optionally record project context.", prepare: async () => {
+        const details = await collectProjectDetails("Refresh details · optional");
+        return details === null ? undefined : async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: true, details }, onOutput);
+      } },
       { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", prepare: async () => {
         const choice = await chooseInference();
         if (!choice) return undefined;
@@ -157,14 +182,14 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         };
       } },
       { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", prepare: async () => async (onOutput) => runDashboardCommand(root, qualityCommand, {}, onOutput) },
-      { label: "Critical gates", description: "List active and AI-proposed protected paths.", prepare: async () => async (onOutput) => runDashboardCommand(root, listCriticalCommand, {}, onOutput) },
-      { label: "Activate AI-proposed gate", description: "Protect a recognized core path and require pre-edit confirmation.", prepare: async () => {
-        const glob = await chooseGate(root, "proposed", "activate");
-        return glob ? async (onOutput) => runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput) : undefined;
-      } },
-      { label: "Remove critical gate", description: "Remove protection from an active core path after confirmation.", prepare: async () => {
-        const glob = await chooseGate(root, "active", "remove");
-        return glob ? async (onOutput) => runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput) : undefined;
+      { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
+        const plan = await manageGates(root);
+        if (!plan || (!plan.activate.length && !plan.remove.length && !plan.add)) return undefined;
+        return async (onOutput) => {
+          for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
+          for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+          if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
+        };
       } },
       { label: "Sync integrations", description: "Regenerate provider files from stored facts.", prepare: async () => async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
       { label: "Delete harness state", description: "Remove .harnessme after confirmation.", prepare: async () => {
@@ -174,17 +199,19 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
       { label: "Exit", description: "Close the dashboard.", prepare: async () => { running = false; return undefined; } },
     ] : [
       { label: "Initialize", description: "Analyze this repository and create its harness.", prepare: async () => {
-        const choice = await chooseInference();
+        const choice = await chooseInitSettings();
         if (!choice) return undefined;
         return async (onOutput) => runDashboardCommand(root, initCommand, {
           provider: choice.provider ?? "auto",
           deterministic: choice.deterministic,
           model: choice.model,
-          councilSize: "2",
+          thinkingLevel: choice.reasoningEffort,
+          councilSize: choice.councilSize,
           aiApiKeyEnv: "",
           aiInclude: "**/*",
           reviewAiApiKeyEnv: "",
           criticalApprovers: "developer",
+          details: choice.details,
         }, onOutput);
       } },
       { label: "Exit", description: "Close the dashboard.", prepare: async () => { running = false; return undefined; } },

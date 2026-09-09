@@ -8,6 +8,7 @@ export interface DashboardState {
   mode: string;
   provider: string;
   model: string;
+  thinking: string;
   activeGates: number;
   proposedGates: number;
   references: number;
@@ -23,6 +24,7 @@ export async function loadDashboardState(root: string): Promise<DashboardState> 
     mode: "not initialized",
     provider: "—",
     model: "—",
+    thinking: "—",
     activeGates: 0,
     proposedGates: 0,
     references: 0,
@@ -41,6 +43,7 @@ export async function loadDashboardState(root: string): Promise<DashboardState> 
     mode: facts.generation?.status ?? (inference ? "AI configured" : "deterministic"),
     provider: inference?.provider ?? "deterministic",
     model: inference?.model ?? "provider default",
+    thinking: inference?.reasoningEffort ?? "provider default",
     activeGates: facts.criticalPaths.paths.filter((item) => item.status === "active").length,
     proposedGates: facts.criticalPaths.paths.filter((item) => item.status === "proposed").length,
     references: facts.referencePack?.documents.length ?? 0,

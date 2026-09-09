@@ -9,6 +9,7 @@ import { criticalCandidates } from "../packages/analyzers/src/critical-candidate
 import { analyzeDocumentation } from "../packages/analyzers/src/documentation.js";
 import { referenceDocuments } from "../packages/renderers/src/reference-pack.js";
 import { nestedAgentDocuments } from "../packages/renderers/src/guidance/nested-agents.js";
+import { agentPackDocuments } from "../packages/renderers/src/guidance/agent-pack.js";
 
 function snapshot(authored = ""): FactsSnapshot {
   const generatedAt = new Date().toISOString();
@@ -26,6 +27,7 @@ function snapshot(authored = ""): FactsSnapshot {
       validationCommands: ["npm test"],
       projectSummary: "A service that verifies repository changes.",
       documentationPaths: ["README.md"],
+      sourcePaths: ["src/core.ts"],
     },
     evidence: [{ id: "ev", path: "src/core.ts", line: 1, kind: "ast", excerpt: "export class Core" }],
     architecture: "# Architecture\n",
@@ -36,7 +38,7 @@ function snapshot(authored = ""): FactsSnapshot {
     referencePack: {
       schemaVersion: 1,
       generatedAt,
-      documents: [{ slug: "core", title: "Core", scope: "src/**", description: "Core changes.", markdown: "# Core\n\n## Scope\n\nsrc\n\n## Responsibilities\n\nOwn core.\n\n## Invariants\n\nPreserve behavior.\n\n## Change workflow\n\nUpdate tests.\n\n## Validation\n\nnpm test\n" }],
+      documents: [{ slug: "core", title: "Core", scope: "src/**", description: "Core changes.", markdown: "# Core\n\n## Scope\n\nsrc\n\n## Responsibilities\n\nOwn core.\n\n## Extension seams\n\nUse `src/core.ts`.\n\n## Invariants\n\nPreserve behavior.\n\n## Change impact\n\nUpdate callers and tests together.\n\n## Anti-patterns\n\nDo not duplicate core behavior.\n\n## Change workflow\n\nUpdate tests.\n\n## Validation\n\nnpm test\n\n## Maintenance triggers\n\nUpdate when the interface changes.\n" }],
     },
   };
 }
@@ -54,6 +56,12 @@ describe("harness quality benchmark", () => {
     shallow.conventions.facts = [];
     shallow.referencePack = undefined;
     expect(assessHarnessQuality(shallow).score).toBeLessThan(25);
+  });
+
+  it("does not award reference-pack quality to shallow scoped notes", () => {
+    const facts = snapshot("# Repository instructions\n\n## Before editing\n\nInspect `src/core.ts`.\n\n## Operating rules\n\nPreserve contracts.\n\n## Core boundaries\n\n`src/core.ts`\n\n## Change workflows\n\nEdit `src/core.ts` and update tests.\n");
+    facts.referencePack!.documents[0]!.markdown = "# Core\n\n## Scope\n\n`src/**`\n\n## Responsibilities\n\nOwn core.\n";
+    expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "reference-pack", passed: false }));
   });
 
   it("detects documentation references that disagree with the repository", async () => {
@@ -129,7 +137,8 @@ describe("harness quality benchmark", () => {
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("## Anti-patterns");
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("`src/coreval/api/services/token_provider.py`");
     expect(nestedAgentDocuments(facts)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("Authentication and security") }),
+      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Local ownership") }),
+      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Change workflow") }),
     ]));
     expect(nestedAgentDocuments(facts, [{
       slug: "persistence",
@@ -140,5 +149,10 @@ describe("harness quality benchmark", () => {
     }])).toEqual([
       expect.objectContaining({ directory: "src/coreval/api" }),
     ]);
+    expect(agentPackDocuments(facts, references)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ".harnessme/agent-pack/architecture.md", markdown: expect.stringContaining("## Cross-module changes") }),
+      expect.objectContaining({ path: ".harnessme/agent-pack/critical-change-audit.md", markdown: expect.stringContaining("## Audit record standard") }),
+      expect.objectContaining({ path: ".harnessme/agent-pack/testing-and-validation.md", markdown: expect.stringContaining("## Validation ladder") }),
+    ]));
   });
 });

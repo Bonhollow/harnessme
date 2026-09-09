@@ -1,9 +1,10 @@
-import { mkdir, readdir, unlink } from "node:fs/promises";
+import { mkdir, readdir, rm, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { FactsSnapshot, ReferenceDocument } from "@harnessme/core";
 import { atomicWrite, exists, readText } from "@harnessme/core";
 import { GENERATED_MARKER } from "../agents-md.js";
 import { nestedAgentDocuments } from "./nested-agents.js";
+import { agentPackDocuments } from "./agent-pack.js";
 
 const SKIPPED_DIRECTORIES = new Set([".git", ".harnessme", ".ruler", "node_modules"]);
 
@@ -52,6 +53,17 @@ export async function syncGuidance(
     if (await exists(absolutePath) && !(await readText(absolutePath)).startsWith(GENERATED_MARKER)) continue;
     await atomicWrite(absolutePath, `${GENERATED_MARKER}\n${document.markdown.trim()}\n`);
     files.push(relativePath);
+  }
+  const agentPack = agentPackDocuments(facts, references);
+  const agentPackDir = join(root, ".harnessme", "agent-pack");
+  await mkdir(agentPackDir, { recursive: true });
+  const expectedAgentPack = new Set(agentPack.map((document) => document.path.slice(".harnessme/agent-pack/".length)));
+  for (const entry of await readdir(agentPackDir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith(".md") && !expectedAgentPack.has(entry.name)) await rm(join(agentPackDir, entry.name));
+  }
+  for (const document of agentPack) {
+    await atomicWrite(join(root, document.path), `${GENERATED_MARKER}\n${document.markdown.trim()}\n`);
+    files.push(document.path);
   }
   return files;
 }

@@ -106,12 +106,16 @@ describe("CLI", () => {
     await writeFile(join(root, "AGENTS.md"), initial.replace("<!-- HARNESSME:PENDING:END -->", "- 2026-09-08: preserve this maintainer note\n<!-- HARNESSME:PENDING:END -->"));
     await writeFile(join(root, "docs", "CORE.md"), "The core lives at `src/core.ts`; the old adapter was `src/missing.ts`.\n");
 
-    const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic", "--details", "The API must remain compatible with external evaluators."]);
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(refreshed.stdout).toContain("Refreshed 7 managed artifact(s)");
+    expect(refreshed.stdout).toContain("Refreshed 10 managed artifact(s)");
     expect(agents).toContain("preserve this maintainer note");
+    expect(agents).toContain("The API must remain compatible with external evaluators.");
     expect(agents).toContain(".harnessme/references/repository-workflow.md");
     expect(await readFile(join(root, ".harnessme", "references", "repository-workflow.md"), "utf8")).toContain("## Invariants");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "architecture.md"), "utf8")).toContain("## Cross-module changes");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "critical-change-audit.md"), "utf8")).toContain("## Audit record standard");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "testing-and-validation.md"), "utf8")).toContain("## Validation ladder");
     expect(JSON.parse(await readFile(join(root, ".harnessme", "facts", "conflicts.json"), "utf8"))).toEqual([
       expect.objectContaining({ document: "docs/CORE.md", reference: "src/missing.ts" }),
     ]);
@@ -214,6 +218,7 @@ describe("CLI", () => {
     const fakeCodex = join(bin, "codex");
     await writeFile(fakeCodex, `#!/usr/bin/env node
 const fs = require("node:fs");
+if (process.env.HARNESSME_TEST_ARGS) fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
 if (process.argv.includes("--version")) { console.log("codex-test"); process.exit(0); }
 process.stdin.resume();
 process.stdin.on("end", () => {
@@ -232,8 +237,9 @@ const value = schema.includes("harnessme_facts")
     await chmod(fakeCodex, 0o755);
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "codex-runtime-fixture" }));
     await writeFile(join(root, "App.kt"), "class Application\n");
-    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "codex"], {
-      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` },
+    const argsLog = join(root, "codex-args.log");
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "codex", "--thinking-level", "high"], {
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, HARNESSME_TEST_ARGS: argsLog },
     });
     expect(initialized.stdout).toContain("✓ AI-assisted mode: codex / provider default");
     expect(initialized.stdout).toContain("✓ AI comparison review: separate pass");
@@ -247,6 +253,8 @@ const value = schema.includes("harnessme_facts")
     const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
     expect(configuration).toContain("- cursor");
     expect(configuration).toContain("provider: codex");
+    expect(configuration).toContain("reasoningEffort: high");
+    expect(await readFile(argsLog, "utf8")).toContain("model_reasoning_effort=high");
     expect(await readFile(join(root, ".harnessme", "facts", "harness-generation.json"), "utf8")).toContain("authorProvider");
     const authoredBeforeFailedRefresh = await readFile(join(root, ".harnessme", "facts", "AGENTS.authored.md"), "utf8");
     const stackBeforeFailedRefresh = await readFile(join(root, ".harnessme", "facts", "stack.yaml"), "utf8");

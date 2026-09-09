@@ -32,6 +32,12 @@ function occurrences(value: string, needle: string): number {
   return value.split(needle).length - 1;
 }
 
+function addAgentPackLinks(markdown: string): string {
+  const links = "- [Architecture and change map](.harnessme/agent-pack/architecture.md): Start here for module routing, task guides, and cross-module change rules.\n- [Testing and validation](.harnessme/agent-pack/testing-and-validation.md): Choose focused coverage and the required verification ladder.\n- [Critical change audit](.harnessme/agent-pack/critical-change-audit.md): Required record standard after a developer confirms a protected edit.";
+  if (markdown.includes(".harnessme/agent-pack/architecture.md")) return markdown;
+  return markdown.replace("## Reference map", `## Reference map\n\n${links}`);
+}
+
 export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {
   const evidence = new Map(facts.evidence.map((item) => [item.id, item]));
   const operationalStatement = (statement: string, category: string): string => {
@@ -66,7 +72,7 @@ export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {
   const documentation = facts.stack.documentationPaths?.length
     ? facts.stack.documentationPaths.slice(0, 12).map((path) => `- Read \`${path}\` when the task touches the behavior it describes.`).join("\n")
     : "- No dedicated operating documentation was detected; establish intent from nearby code, tests, and checked-in configuration.";
-  const referenceMap = renderReferenceMap(facts);
+  const referenceMap = `${addAgentPackLinks("## Reference map").replace("## Reference map", "").trim()}\n${renderReferenceMap(facts)}`.trim();
   const conflicts = facts.documentationConflicts?.length
     ? facts.documentationConflicts.map((item) => item.kind === "contradiction"
       ? `- \`${item.document}:${item.line}\` conflicts with \`${item.implementationPath}:${item.implementationLine}\`: ${item.message} Verify both sides before editing.`
@@ -119,11 +125,11 @@ export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {
     if (unknownTokens.length) throw new Error(`AI-authored instructions contain unknown managed placeholders: ${unknownTokens.join(", ")}`);
     const pendingSection = `${PENDING_START}\n### Pending updates (edit directly — no command needed)\nShipped or materially changed a feature? Add one dated bullet below.\n\n${pendingBody}${PENDING_END}`;
     const managedCritical = `${critical}\n\n### Proposed critical paths\n\n${proposals}`;
-    return `${GENERATED_MARKER}\n${facts.authoredInstructions.trim()}\n`
+    return addAgentPackLinks(`${GENERATED_MARKER}\n${facts.authoredInstructions.trim()}\n`
       .replace(CRITICAL_PATHS_TOKEN, managedCritical)
       .replace(DIRECTIVES_TOKEN, directives)
       .replace(VERIFIED_CHANGES_TOKEN, changes)
-      .replace(PENDING_TOKEN, pendingSection);
+      .replace(PENDING_TOKEN, pendingSection));
   }
   return `${GENERATED_MARKER}\n# Repository instructions\n\nUse this file as the operating contract for changes in this repository. Prefer repository evidence and maintainer directives over generic assumptions.\n\n## Project purpose\n\n${facts.stack.projectSummary ?? "Determine the intended behavior from repository documentation and nearby tests before changing it."}\n\nUse the checked-in tasks through ${facts.stack.packageManagers.join(", ") || "the repository's configured tooling"}; do not substitute unverified commands.\n\n## Before editing\n\n- Identify the owning module, trace its callers and public contracts, and inspect nearby tests before changing code.\n${documentation}\n\n## Reference map\n\n${referenceMap}\n\n## Repository map\n\n${moduleMap}\n\n## Operating rules\n\n${operatingRules}\n\n${conventions}\n\n## Known documentation conflicts\n\n${conflicts}\n\n## Core boundaries\n\n${coreBoundaries}\n\n## Change workflows\n\n${primaryWorkflow}\n- For public contracts or persisted data, trace compatibility impact and migration or rollback needs before implementation.\n- For a gated core path, obtain explicit developer confirmation before editing and record the approved material change.\n\n## Validation\n\nRun the relevant verified commands after changing behavior:\n\n${validation}\n\n## Documentation maintenance\n\nUpdate the task-relevant documentation above when a public contract, invariant, workflow, or canonical extension seam changes. Do not replace verified repository guidance with generic advice.\n\n## Critical-path safety gate\n\nBefore editing a path matching any active rule below, stop and ask the developer for explicit confirmation. A draft record is not confirmation. Never approve your own change or bypass the gate. After confirmation, create a draft with \`harnessme critical draft\`; an allowed reviewer must approve the exact staged content, and the approved record plus \`.harnessme/CRITICAL.md\` must ship with the change.\n\n${critical}\n\n## Proposed critical paths\n\nThese heuristic candidates are informational until a maintainer activates them with \`harnessme critical activate <glob>\`.\n\n${proposals}\n\n## Verified material changes\n\n${changes}\n\n## Project directives\n\n${directives}\n\n## Keeping this harness current\n\nAfter shipping or materially changing behavior, add one dated bullet to the pending section. No command is needed during the coding session. A later \`harnessme validate\` verifies the claim against repository evidence.\n\n${PENDING_START}\n### Pending updates (edit directly — no command needed)\nShipped or materially changed a feature? Add one dated bullet below.\n\n${pendingBody}${PENDING_END}\n`;
 }

@@ -8,6 +8,7 @@ export interface InferenceChoice {
   deterministic: boolean;
   provider?: InferenceProviderId;
   model?: string;
+  reasoningEffort?: "low" | "medium" | "high";
 }
 
 export type OperationOutput = (chunk: string) => void;
@@ -41,6 +42,7 @@ export async function configureInference(root: string, choice: InferenceChoice):
       provider: choice.provider,
       frameworks,
       model: choice.model,
+      reasoningEffort: choice.reasoningEffort,
       apiKeyEnv: previous?.apiKeyEnv ?? "",
       maxFiles: previous?.maxFiles ?? 40,
       maxFileBytes: previous?.maxFileBytes ?? 65_536,

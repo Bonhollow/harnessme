@@ -64,10 +64,16 @@ const gateJsonSchema = {
           slug: { type: "string", pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
           title: { type: "string", minLength: 1, maxLength: 120 },
           scope: { type: "string", minLength: 1, maxLength: 500 },
+          scopes: {
+            type: "array",
+            minItems: 1,
+            maxItems: 12,
+            items: { type: "string", minLength: 1, maxLength: 500 },
+          },
           description: { type: "string", minLength: 1, maxLength: 300 },
           markdown: { type: "string", minLength: 100, maxLength: 8000 },
         },
-        required: ["slug", "title", "scope", "description", "markdown"],
+        required: ["slug", "title", "scope", "scopes", "description", "markdown"],
       },
     },
   },
@@ -152,6 +158,16 @@ function escapedRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
+function contextLines(value?: string): string[] {
+  return value?.split(/\r?\n/u) ?? [];
+}
+
+function scopeContainsCitation(scope: string, citation: string): boolean {
+  const path = citation.replace(/:\d+$/u, "");
+  const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
+  return scope === "**/*" || path === base || path.startsWith(`${base}/`);
+}
+
 function sectionBody(markdown: string, heading: string): string {
   const start = markdown.indexOf(heading);
   if (start < 0) return "";
@@ -181,16 +197,27 @@ function normalizeHeadingAliases(markdown: string): string {
 
 function normalizeReferenceHeadingAliases(markdown: string): string {
   return markdown
-    .replace(/^##[ \t]+(?:Ownership|Ownership and invariants)[ \t]*$/gimu, "## Responsibilities")
+    // Models often combine these related sections. Normalize the heading as a
+    // whole before the completion pass checks for exact section names; never
+    // replace only the `Responsibilities` prefix and leave a dangling suffix.
+    .replace(/^##[ \t]+(?:Ownership|Ownership seam|Ownership and invariants|Responsibilities and invariants)[ \t]*$/gimu, "## Responsibilities")
+    .replace(/^##[ \t]+(?:Supported extensions?|Extension points?|Interfaces? and extension seams)[ \t]*$/gimu, "## Extension seams")
+    .replace(/^##[ \t]+(?:Coupled changes?|Change-together map|Impact map)[ \t]*$/gimu, "## Change impact")
+    .replace(/^##[ \t]+(?:Forbidden patterns?|What not to do)[ \t]*$/gimu, "## Anti-patterns")
     .replace(/^##[ \t]+Workflow[ \t]*$/gimu, "## Change workflow")
-    .replace(/^##[ \t]+(?:Checks|Verification)[ \t]*$/gimu, "## Validation");
+    .replace(/^##[ \t]+(?:Checks|Verification)[ \t]*$/gimu, "## Validation")
+    .replace(/^##[ \t]+(?:Maintenance|Documentation trigger|Update trigger)[ \t]*$/gimu, "## Maintenance triggers");
 }
 
 function normalizeReferenceScope(reference: ReferenceDocument, analysis: AnalysisResult, facts: FactsSnapshot): ReferenceDocument {
   const isGrounded = (scope: string): boolean => {
     const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
-    return scope === "**/*" || analysis.sourceFiles.some((path) => path === base || path.startsWith(`${base}/`))
-      || (facts.stack.documentationPaths ?? []).some((path) => path === base || path.startsWith(`${base}/`));
+    const paths = [...analysis.sourceFiles, ...facts.stack.documentationPaths ?? []];
+    // A recursive scope must name a directory; a recursive file scope is never a
+    // meaningful location for instructions, even if that file exists.
+    return scope === "**/*" || (scope.endsWith("/**")
+      ? paths.some((path) => path.startsWith(`${base}/`))
+      : paths.some((path) => path === base || path.startsWith(`${base}/`)));
   };
   const complete = (value: ReferenceDocument): ReferenceDocument => {
     const scopeBase = value.scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
@@ -204,11 +231,16 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
     append("Change workflow", "1. Inspect the owning implementation, callers, and nearby tests.\n2. Update affected consumers and tests together.\n3. Run the relevant validated checks.");
     append("Validation", "Run the repository's validated checks relevant to the changed behavior.");
     const responsibilities = sectionBody(markdown, "## Responsibilities");
-    if (!/`[^`]+`/u.test(responsibilities) || !/\b(?:own|keep|use|route|implement|extend|call)\b/iu.test(responsibilities)) {
+    if (!/`[^`]+`/u.test(responsibilities) || !/\b(?:calls?|configures?|coordinates?|defines?|extends?|implements?|keeps?|maps?|owns?|routes?|supplies?|uses?|validates?|writes?)\b/iu.test(responsibilities)) {
       markdown = markdown.replace("## Responsibilities", `## Responsibilities\n\n- Own changes within \`${value.scope}\` through the existing implementation seam.`);
     }
     const invariants = sectionBody(markdown, "## Invariants");
-    if (!/\b(?:must|preserve|never|do not|keep|remain)\b/iu.test(invariants)) {
+    const genericInvariant = `- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`;
+    const substantiveInvariants = invariants.replace(genericInvariant, "").trim();
+    const invariantLanguage = /\b(?:accepts? only|cannot|do not|does not|excludes?|keeps?|must|never|preserves?|rejects?|remains?|requires?|returns? only|wins?)\b/iu;
+    if (substantiveInvariants && invariantLanguage.test(substantiveInvariants)) {
+      markdown = markdown.replace(`${genericInvariant}\n\n`, "").replace(`\n\n${genericInvariant}`, "");
+    } else if (!invariantLanguage.test(invariants)) {
       markdown = markdown.replace("## Invariants", `## Invariants\n\n- Preserve the established behavior and public contracts within this scope.${citation ? ` Evidence: \`${citation.path}:${citation.line}\`.` : ""}`);
     }
     const workflow = sectionBody(markdown, "## Change workflow");
@@ -219,7 +251,13 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
         "## Change workflow\n\n1. Inspect the owning implementation, callers, and nearby tests.\n2. Update affected consumers and tests together.",
       );
     }
-    return { ...value, markdown };
+    const suppliedScopes = [...new Set(value.scopes?.length ? value.scopes : [value.scope])].filter(isGrounded);
+    const scopes = suppliedScopes.length ? suppliedScopes : [value.scope];
+    const scopeText = scopes.length === 1
+      ? `Use this guide for changes in \`${scopes[0]}\`.`
+      : `Read this cross-cutting guide when a task changes any of:\n${scopes.map((scope) => `- \`${scope}\``).join("\n")}`;
+    markdown = markdown.replace(/(## Scope\s+)([\s\S]*?)(?=\n## |$)/u, `$1${scopeText}\n`);
+    return { ...value, scopes, markdown };
   };
   const compositeScope = /[,;{}]/u.test(reference.scope);
   if (isGrounded(reference.scope) && !compositeScope) return complete(reference);
@@ -230,7 +268,7 @@ function normalizeReferenceScope(reference: ReferenceDocument, analysis: Analysi
     const candidate = `${segments.join("/")}/**`;
     if (isGrounded(candidate)) {
       const markdown = reference.markdown.replace(/(## Scope\s+)([\s\S]*?)(?=\n## |$)/u, `$1Use this guide for changes in \`${candidate}\`.\n`);
-      return complete({ ...reference, scope: candidate, markdown });
+      return complete({ ...reference, scope: candidate, scopes: [candidate], markdown });
     }
     segments.pop();
   }
@@ -252,6 +290,20 @@ function completeConventionCitations(markdown: string, facts: FactsSnapshot): st
     : markdown;
 }
 
+function operationalDepthScore(markdown: string, references: ReferenceDocument[]): number {
+  const allReferenceMarkdown = references.map((reference) => reference.markdown).join("\n");
+  const concreteTokens = new Set([...allReferenceMarkdown.matchAll(/`([^`]+)`/gu)].map((match) => match[1]).filter(Boolean));
+  const namedSymbols = new Set([...allReferenceMarkdown.matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\(\)/gu)].map((match) => match[0]));
+  const citations = new Set([...`${markdown}\n${allReferenceMarkdown}`.matchAll(/`([^`]+:\d+)`/gu)].map((match) => match[1]).filter(Boolean));
+  const workflows = references.reduce((total, reference) => total + sectionBody(reference.markdown, "## Change workflow")
+    .split(/\r?\n/u).filter((line) => /^\s*(?:[-*]|\d+\.)\s+/u.test(line)).length, 0);
+  return references.length * 20
+    + Math.min(concreteTokens.size, 50)
+    + Math.min(namedSymbols.size * 3, 30)
+    + Math.min(citations.size * 2, 30)
+    + Math.min(workflows, 30);
+}
+
 function validateAuthoredMarkdown(
   markdown: string,
   gates: Array<{ path: string; reason: string; risk: GateCandidate["risk"] | null }>,
@@ -260,7 +312,10 @@ function validateAuthoredMarkdown(
   facts: FactsSnapshot,
   analysis: AnalysisResult,
 ): string {
-  let normalized = normalizeHeadingAliases(markdown.trim());
+  let normalized = normalizeHeadingAliases(markdown.trim())
+    .replace(/^<!-- Generated by HarnessME\.[^\n]*-->\s*/u, "")
+    .replace(/^<!-- HARNESSME:PENDING:(?:START|END) -->\s*$/gmu, "")
+    .trim();
   if (normalized.split(/\r?\n/u).length > 220) invalid("AI-authored root AGENTS.md is too long; move detailed guidance into scoped references.");
   const requiredSections = [
     "# Repository instructions",
@@ -299,11 +354,22 @@ function validateAuthoredMarkdown(
     if (!eligible.has(gate.path)) invalid(`AI selected an unverified critical path: ${gate.path}`);
   }
   const groundedPath = (value: string): boolean => {
-    const path = value.replace(/\/$/u, "").replace(/\/\*\*$/u, "");
+    const path = value.replace(/:\d+$/u, "").replace(/\/$/u, "").replace(/\/\*\*$/u, "");
     return eligible.has(path)
       || eligible.has(`${path}/**`)
       || analysis.sourceFiles.some((source) => source === path || source.startsWith(`${path}/`));
   };
+  const contextualCitations = new Set<string>();
+  let contextPath: string | undefined;
+  for (const line of contextLines(analysis.authorContext)) {
+    const file = line.match(/^FILE (.+)$/u);
+    if (file?.[1]) {
+      contextPath = file[1];
+      continue;
+    }
+    const numbered = line.match(/^(\d+): /u);
+    if (contextPath && numbered?.[1]) contextualCitations.add(`${contextPath}:${numbered[1]}`);
+  }
   const referenceMap = sectionBody(normalized, "## Reference map");
   const needsReferences = analysis.stack.topLevelModules.length > 0 || Boolean(facts.stack.documentationPaths?.length);
   if (needsReferences && references.length === 0) invalid("AI-authored harness must include at least one scoped reference document.");
@@ -313,33 +379,61 @@ function validateAuthoredMarkdown(
     slugs.add(reference.slug);
     const referencePath = `.harnessme/references/${reference.slug}.md`;
     if (!referenceMap.includes(referencePath)) invalid(`AGENTS.md does not link to authored reference: ${referencePath}`);
-    for (const heading of ["# ", "## Scope", "## Responsibilities", "## Invariants", "## Change workflow", "## Validation"]) {
+    for (const heading of ["# ", "## Scope", "## Responsibilities", "## Extension seams", "## Invariants", "## Change impact", "## Anti-patterns", "## Change workflow", "## Validation", "## Maintenance triggers"]) {
       if (!reference.markdown.includes(heading)) invalid(`Authored reference ${reference.slug} is missing ${heading.trim()}.`);
     }
     if (/\b\w+\s*\([^\n)]*%\)/iu.test(reference.markdown)) invalid(`Authored reference ${reference.slug} contains inventory statistics.`);
-    const scopeBase = reference.scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
-    const scopeIsGrounded = reference.scope === "**/*"
-      || analysis.sourceFiles.some((path) => path === scopeBase || path.startsWith(`${scopeBase}/`))
-      || (facts.stack.documentationPaths ?? []).some((path) => path === scopeBase || path.startsWith(`${scopeBase}/`));
-    if (!scopeIsGrounded) invalid(`Authored reference ${reference.slug} uses an unverified scope: ${reference.scope}`);
-    const relevantEvidence = facts.evidence.filter((item) => reference.scope === "**/*" || item.path === scopeBase || item.path.startsWith(`${scopeBase}/`));
-    if (relevantEvidence.length && !relevantEvidence.some((item) => reference.markdown.includes(`${item.path}:${item.line}`))) {
+    const scopes = reference.scopes?.length ? reference.scopes : [reference.scope];
+    const scopeIsGrounded = (scope: string): boolean => {
+      const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
+      const paths = [...analysis.sourceFiles, ...facts.stack.documentationPaths ?? []];
+      return scope === "**/*" || (scope.endsWith("/**")
+        ? paths.some((path) => path.startsWith(`${base}/`))
+        : paths.some((path) => path === base || path.startsWith(`${base}/`)));
+    };
+    if (!scopes.every(scopeIsGrounded)) invalid(`Authored reference ${reference.slug} uses an unverified scope: ${scopes.join(", ")}`);
+    const relevantEvidence = facts.evidence.filter((item) => scopes.some((scope) => {
+      const base = scope.replace(/\*.*$/u, "").replace(/\/$/u, "");
+      return scope === "**/*" || item.path === base || item.path.startsWith(`${base}/`);
+    }));
+    const citedContext = [...reference.markdown.matchAll(/`([^`\n]+:\d+)`/gu)]
+      .map((match) => match[1])
+      .some((citation) => citation && contextualCitations.has(citation) && scopes.some((scope) => scopeContainsCitation(scope, citation)));
+    if ((relevantEvidence.length || contextualCitations.size) && !relevantEvidence.some((item) => reference.markdown.includes(`${item.path}:${item.line}`)) && !citedContext) {
       invalid(`Authored reference ${reference.slug} must cite evidence inside its scope.`);
     }
     const responsibilities = sectionBody(reference.markdown, "## Responsibilities");
+    const extensionSeams = sectionBody(reference.markdown, "## Extension seams");
     const invariants = sectionBody(reference.markdown, "## Invariants");
+    const changeImpact = sectionBody(reference.markdown, "## Change impact");
+    const antiPatterns = sectionBody(reference.markdown, "## Anti-patterns");
     const workflow = sectionBody(reference.markdown, "## Change workflow");
     const referenceValidation = sectionBody(reference.markdown, "## Validation");
-    if (!/`[^`]+`/u.test(responsibilities) || !/\b(?:own|keep|use|route|implement|extend|call)\b/iu.test(responsibilities)) {
+    const maintenance = sectionBody(reference.markdown, "## Maintenance triggers");
+    if (!/`[^`]+`/u.test(responsibilities) || !/\b(?:calls?|configures?|coordinates?|defines?|extends?|implements?|keeps?|maps?|owns?|routes?|supplies?|uses?|validates?|writes?)\b/iu.test(responsibilities)) {
       invalid(`Authored reference ${reference.slug} must name concrete ownership or extension seams.`);
     }
-    if (!/\b(?:must|preserve|never|do not|keep|remain)\b/iu.test(invariants)) {
+    if (!/\b(?:accepts? only|cannot|do not|does not|excludes?|keeps?|must|never|preserves?|rejects?|remains?|requires?|returns? only|wins?)\b/iu.test(invariants)) {
       invalid(`Authored reference ${reference.slug} must state actionable invariants.`);
     }
+    if (extensionSeams.length < 40 || !/`[^`]+`/u.test(extensionSeams)) {
+      invalid(`Authored reference ${reference.slug} must identify a concrete supported extension seam.`);
+    }
+    if (changeImpact.length < 40 || !/\b(?:affect\w*|also|caller\w*|consumer\w*|coupl\w*|downstream|producer\w*|together|upstream|update\w*)\b/iu.test(changeImpact)) {
+      invalid(`Authored reference ${reference.slug} must explain concrete change impact and coupled owners.`);
+    }
+    if (!/\b(?:avoid|do not|never)\b/iu.test(antiPatterns)) {
+      invalid(`Authored reference ${reference.slug} must name repository-specific anti-patterns.`);
+    }
     const workflowSteps = workflow.split(/\r?\n/u).filter((line) => /^\s*(?:[-*]|\d+\.)\s+/u.test(line)).length;
-    if (workflowSteps < 2) invalid(`Authored reference ${reference.slug} must provide a multi-step change workflow.`);
+    if (workflowSteps < 3) invalid(`Authored reference ${reference.slug} must provide a three-step change workflow.`);
     if (analysis.commands.length && !analysis.commands.some((command) => referenceValidation.includes(command))) {
       invalid(`Authored reference ${reference.slug} must include a verified validation command.`);
+    }
+    if (maintenance.length < 40
+      || !/\b(?:after|before|if|on|when|whenever)\b/iu.test(maintenance)
+      || !/\b(?:add|change|introduce|maintain|remove|rename|revise|update)\w*\b/iu.test(maintenance)) {
+      invalid(`Authored reference ${reference.slug} must define when its guidance changes with the code.`);
     }
   }
   for (const command of analysis.commands) {
@@ -445,6 +539,7 @@ export async function authorHarnessWithAi(options: {
     verifiedChanges: options.facts.changes,
     validationCommands: options.analysis.commands,
     documentationConflicts: options.analysis.documentationConflicts ?? [],
+    repositoryContext: options.analysis.authorContext,
     gateCandidates: candidates,
     deterministicBaseline: options.deterministicBaseline,
     previousHarness: options.previousHarness,
@@ -458,7 +553,9 @@ The Markdown must contain these exact headings: # Repository instructions, ## Pr
 
 Under Project purpose, explain the repository's behavior and primary outcome. Before editing must tell an agent how to identify the owning seam, callers, tests, and task-relevant documents. Under Reference map, link every generated reference as \`.harnessme/references/<slug>.md\` and tell agents when to read it. Under Repository map, state where each major responsibility lives; name owning functions, types, registries, or configuration and the supported extension seam when evidence provides them, rather than merely describing directories. Under Operating rules, write at least two imperative rules grounded in the supplied evidence. Under Known documentation conflicts, list every supplied conflict with its document:line and missing or contradictory reference; tell agents to verify current implementation instead of silently choosing a side. Under Core boundaries, name concrete repository-relative files or directories, explain their responsibility or invariant, and state how an agent must operate when changing them. Explicitly cover persisted contracts, authentication/security context, public interfaces, and files that must change together when supported by evidence. Under Change workflows, give at least two repository-specific change recipes: where to make the change, what must change together, and how to verify it. Under Documentation maintenance, route agents to detected documentation and state when it must be updated with code. Preserve every validation command verbatim and at least one path:line citation for each convention. Mention technologies only where they change how an agent builds, tests, or edits the repository; do not produce an exhaustive language/framework inventory. Do not report language percentages, file counts, dependency inventories, raw import counts, or generic repository observations unless they directly change how the agent must work.
 
-Return one to eight focused reference documents for complex modules or concerns. Each reference needs a safe lowercase slug, title, repository-relative scope, short description, and Markdown with exactly useful guidance under # <title>, ## Scope, ## Responsibilities, ## Invariants, ## Change workflow, and ## Validation. Keep each under 8,000 characters. Generate references only when supported by evidence. Prefer concern-based references such as persistence, authentication, public API, or evaluation workflow over one shallow file per directory. Include recurring anti-patterns or forbidden edits inside the relevant reference when the evidence supports them.
+Return one to eight focused reference documents for complex modules or concerns. Each reference needs a safe lowercase slug, title, a primary repository-relative scope, an explicit scopes array containing every affected repository-relative scope, short description, and Markdown under these exact headings: # <title>, ## Scope, ## Responsibilities, ## Extension seams, ## Invariants, ## Change impact, ## Anti-patterns, ## Change workflow, ## Validation, and ## Maintenance triggers. A recursive \`/**\` scope must name a directory, never a file. For cross-cutting contracts such as browser/server authentication or API/persistence, list every affected scope instead of pretending one directory owns the contract. Keep each under 8,000 characters. Generate references only when supported by evidence. Prefer concern-based references such as persistence, authentication, public API, or evaluation workflow over one shallow file per directory.
+
+Make every reference an executable change manual, not a summary. Name concrete functions, classes, types, registries, configuration keys, and files when the repository context exposes them. Explain the interface and its error modes or ordering constraints; identify the narrow supported extension seam; map producers, consumers, persistence, generated artifacts, and tests that must change together; state at least two repository-specific invariants and two forbidden shortcuts; provide a minimum three-step workflow including focused validation; and state exactly when this guide must be updated. Favor depth and locality: tell the agent how to get a capability through an existing deep module rather than duplicating implementation across callers. Never invent a symbol or relationship absent from the evidence or repository context.
 
 Under the critical-path heading, explicitly say that before editing a listed path the agent must stop and ask the developer for explicit confirmation. Explain that the agent cannot self-approve or bypass the gate. Put ${CRITICAL_PATHS_TOKEN} on its own line where active rules belong, ${VERIFIED_CHANGES_TOKEN} under verified material changes, ${DIRECTIVES_TOKEN} under project directives, and ${PENDING_TOKEN} under the keeping-current section. Do not emit HarnessME HTML markers.
 
@@ -474,7 +571,7 @@ Choose gates only from gateCandidates. Gate only genuinely central, high-impact 
   options.onPhase?.(`Comparing and reviewing AGENTS.md with ${reviewer.name}`);
   const reviewSystem = `Act as an independent harness reviewer and final editor. Compare the AI draft against the deterministic baseline and validated evidence. Return a corrected, complete final Markdown document—not commentary or a patch. Reject an inventory report: the result must be a practical operating contract that tells a coding agent what to inspect first, where changes belong, which core invariants and boundaries must survive, what must be updated together, which existing documents apply to the task, and which exact checks prove the work. Prefer a concise root contract with progressive disclosure into repository documentation. It must retain every validation command verbatim and at least one path:line citation for each convention. Mention technologies only when operationally relevant. Avoid invented commands or architecture, language percentages, file counts, dependency inventories, and raw import counts. Review every proposed gate for impact and remove gates that are broad, weakly supported, or merely convenient. You may select only supplied gateCandidates.
 
-Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VERIFIED_CHANGES_TOKEN}, ${DIRECTIVES_TOKEN}, and ${PENDING_TOKEN}. Review the scoped references as carefully as the root document; remove repetition and unsupported claims while retaining concrete ownership, invariants, workflows, and validation. The critical-path section must explicitly require the coding agent to stop and ask the developer for explicit confirmation before editing a listed path, and must prohibit self-approval or bypass. Return a short comparison summary alongside the corrected Markdown, references, and final gates.`;
+Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VERIFIED_CHANGES_TOKEN}, ${DIRECTIVES_TOKEN}, and ${PENDING_TOKEN}. Review the scoped references as carefully as the root document; remove repetition and unsupported claims while retaining concrete ownership, extension seams, invariants, change-impact maps, anti-patterns, three-step workflows, validation, and maintenance triggers. Each reference must be useful enough to execute a change: name exact symbols when available, explain what callers must know about the interface, and identify coupled producers, consumers, and tests without exposing irrelevant implementation detail. Every reference must provide its explicit scopes array; recursive scopes must be directories. The critical-path section must explicitly require the coding agent to stop and ask the developer for explicit confirmation before editing a listed path, and must prohibit self-approval or bypass. Return a short comparison summary alongside the corrected Markdown, references, and final gates.`;
   const councilSize = options.councilSize ?? 2;
   const reviewedCandidates = await Promise.all(Array.from({ length: councilSize }, async (_, index) => ReviewSchema.parse(await reviewer.generate(
     "harnessme_agents_review",
@@ -488,18 +585,19 @@ Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VE
   let validated = "";
   try {
     let lastError: unknown;
-    let selected = false;
+    const validCandidates: Array<{ candidate: typeof reviewed; markdown: string; score: number }> = [];
     for (const candidate of reviewedCandidates) {
       try {
         const references = candidate.references.map((reference) => normalizeReferenceScope(reference, options.analysis, options.facts));
-        validated = validateAuthoredMarkdown(candidate.markdown, candidate.gates, references, eligible, options.facts, options.analysis);
-        final = { ...candidate, references };
-        reviewed = candidate;
-        selected = true;
-        break;
+        const markdown = validateAuthoredMarkdown(candidate.markdown, candidate.gates, references, eligible, options.facts, options.analysis);
+        validCandidates.push({ candidate: { ...candidate, references }, markdown, score: operationalDepthScore(markdown, references) });
       } catch (error) { lastError = error; }
     }
+    const selected = validCandidates.sort((left, right) => right.score - left.score)[0];
     if (!selected) throw lastError;
+    validated = selected.markdown;
+    final = selected.candidate;
+    reviewed = selected.candidate;
   } catch (error) {
     let validationError = error instanceof Error ? error.message : String(error);
     let repairedResult: typeof final | undefined;
@@ -508,7 +606,7 @@ Keep all required headings and exactly one each of ${CRITICAL_PATHS_TOKEN}, ${VE
       const repairSystem = `${reviewSystem}
 
 Your previous final document failed HarnessME's local validation: ${validationError}
-Correct that exact defect while preserving all valid content and constraints. This is a strict acceptance test, not a suggestion: the Change workflows section must have at least two actionable bullets and at least one backticked repository-relative source path from the supplied evidence; every generated reference must include its required headings, ownership seam, invariant, multi-step workflow, and verified command. Return the complete corrected document and gates.`;
+Correct that exact defect while preserving all valid content and constraints. This is a strict acceptance test, not a suggestion: the Change workflows section must have at least two actionable bullets and at least one backticked repository-relative source path from the supplied evidence; every generated reference must include all ten required headings, a concrete supported extension seam, actionable invariants, coupled change impact, repository-specific anti-patterns, a three-step workflow, a verified command, and a maintenance trigger. Return the complete corrected document and gates.`;
       const repaired = ReviewSchema.parse(await reviewer.generate(
         "harnessme_agents_repair",
         reviewJsonSchema,

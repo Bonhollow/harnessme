@@ -8,6 +8,8 @@ export interface AnalysisResult {
   hotspots: Array<{ path: string; changes: number; fanIn: number; score: number }>;
   warnings: string[];
   aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
+  /** Redacted, bounded repository excerpts for authorship. This is never persisted. */
+  authorContext?: string;
   sourceFiles: string[];
   commands: string[];
   documentationConflicts?: DocumentationConflict[];

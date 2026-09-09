@@ -66,11 +66,13 @@ export default defineCommand({
     "review-provider": { type: "string", description: "Optional independent fact reviewer: auto, codex, claude-code, cursor, or http" },
     "council-size": { type: "string", description: "Independent AGENTS.md reviewers (1-3; default 2)", default: "2" },
     targets: { type: "string", description: "Comma-separated output targets; defaults to every supported framework" },
-    "extra-prompt": { type: "string", description: "Maintainer-authored project directive" },
+    details: { type: "string", description: "Optional maintainer context for the harness author (domain rules, constraints, or risks)" },
+    "extra-prompt": { type: "string", description: "Deprecated alias for --details" },
     "critical-approvers": { type: "string", description: "Comma-separated handles for automatically detected critical paths", default: "developer" },
     deterministic: { type: "boolean", description: "Disable model inference and use local deterministic analysis only" },
     "ai-endpoint": { type: "string", description: "Chat-completions endpoint when --provider=http" },
     model: { type: "string", description: "Optional inference model override; otherwise use the framework default" },
+    "thinking-level": { type: "string", description: "Codex reasoning effort: low, medium, or high" },
     "ai-api-key-env": { type: "string", description: "Environment variable containing the optional endpoint API key", default: "" },
     "ai-include": { type: "string", description: "Comma-separated source globs allowed for model inference", default: "**/*" },
     "ai-exclude": { type: "string", description: "Comma-separated source globs excluded from model inference" },
@@ -109,6 +111,7 @@ export default defineCommand({
         frameworks: frameworkList(requestedProvider),
         endpoint,
         model: typeof args.model === "string" ? args.model : undefined,
+        reasoningEffort: typeof args.thinkingLevel === "string" ? args.thinkingLevel as "low" | "medium" | "high" : undefined,
         apiKeyEnv: String(args.aiApiKeyEnv),
       };
       const resolvedProvider = await resolveInferenceProvider(provisional);
@@ -116,6 +119,12 @@ export default defineCommand({
         if (requestedProvider !== "auto") throw new Error(`The selected inference provider is not installed or authenticated: ${requestedProvider}.`);
         throw new Error("No authenticated AI inference provider is available. Authenticate Codex, Claude Code, or Cursor, choose an available provider, or explicitly opt in to local-only generation with --deterministic.");
       } else {
+        if (provisional.reasoningEffort && !["low", "medium", "high"].includes(provisional.reasoningEffort)) {
+          throw new Error("--thinking-level must be low, medium, or high.");
+        }
+        if (provisional.reasoningEffort && resolvedProvider !== "codex") {
+          throw new Error("--thinking-level is currently available only with --provider codex.");
+        }
         const model = await resolveModel(resolvedProvider, endpoint, provisional.apiKeyEnv, provisional.model);
         if (resolvedProvider === "http" && !model) throw new Error("HTTP inference requires --model (or an interactive model selection).");
         config.analysis.aiFallback = {
@@ -124,6 +133,7 @@ export default defineCommand({
           frameworks: frameworkList(resolvedProvider),
           endpoint,
           model,
+          reasoningEffort: provisional.reasoningEffort,
           apiKeyEnv: provisional.apiKeyEnv,
           maxFiles: 40,
           maxFileBytes: 65_536,
@@ -215,8 +225,11 @@ export default defineCommand({
         info("Imported the pre-existing .ruler/AGENTS.md as directives and archived the original.");
       }
     }
-    if (typeof args.extraPrompt === "string") {
-      directives += `## ${new Date().toISOString().slice(0, 10)}\n\n${args.extraPrompt.trim()}\n`;
+    const suppliedDetails = [args.details, args.extraPrompt]
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .map((value) => value.trim());
+    if (suppliedDetails.length) {
+      directives += `## ${new Date().toISOString().slice(0, 10)} — Maintainer project context\n\n${suppliedDetails.join("\n\n")}\n`;
     }
     await atomicWrite(join(base, "facts", "directives.md"), directives);
     await atomicWrite(

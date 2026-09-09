@@ -63,6 +63,7 @@ const InferenceConfigSchema = z.object({
   frameworks: z.array(z.enum(["codex", "claude-code", "cursor"])).default([]),
   endpoint: z.string().url().optional(),
   model: z.string().min(1).optional(),
+  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
   apiKeyEnv: z.string().default(""),
 });
 
@@ -134,6 +135,7 @@ export type Stack = z.infer<typeof StackSchema>;
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 export type AiFallbackConfig = NonNullable<HarnessConfig["analysis"]["aiFallback"]>;
 export type AiReviewConfig = NonNullable<HarnessConfig["analysis"]["review"]>;
+export type CriticalPath = z.infer<typeof CriticalPathSchema>;
 export type CriticalPaths = z.infer<typeof CriticalPathsSchema>;
 export type VerifiedChange = z.infer<typeof VerifiedChangeSchema>;
 export type VerifiedChanges = z.infer<typeof VerifiedChangesSchema>;
@@ -142,6 +144,9 @@ export const ReferenceDocumentSchema = z.object({
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   title: z.string().min(1).max(120),
   scope: z.string().min(1).max(500),
+  // `scope` remains the primary placement for backwards-compatible consumers.
+  // Cross-cutting contracts can additionally name every affected source scope.
+  scopes: z.array(z.string().min(1).max(500)).min(1).max(12).optional(),
   description: z.string().min(1).max(300),
   markdown: z.string().min(100).max(8_000),
 });

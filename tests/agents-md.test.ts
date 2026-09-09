@@ -40,6 +40,9 @@ describe("AGENTS.md renderer", () => {
     expect(output).toContain("## Operating rules");
     expect(output).toContain("## Core boundaries");
     expect(output).toContain("## Change workflows");
+    expect(output).toContain(".harnessme/agent-pack/architecture.md");
+    expect(output).toContain(".harnessme/agent-pack/critical-change-audit.md");
+    expect(output).toContain(".harnessme/agent-pack/testing-and-validation.md");
     expect(output).toContain("`docs/ARCHITECTURE.md`");
     expect(output).toContain("A service for evaluating repository changes.");
     expect(output).toContain("`npm test`");

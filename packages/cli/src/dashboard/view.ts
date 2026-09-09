@@ -32,8 +32,13 @@ export function buildSelectionScreen(
 ): SelectRenderable {
   const root = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%", backgroundColor: COLORS.background, padding: 1, gap: 1 });
   renderer.root.add(root);
-  addText(renderer, root, title, { height: 1, fg: COLORS.accent });
-  addText(renderer, root, description, { height: 2, fg: COLORS.muted });
+  const header = new BoxRenderable(renderer, { height: 4, backgroundColor: "#075985", paddingX: 2, flexDirection: "column" });
+  root.add(header);
+  addText(renderer, header, "HarnessME  ·  Guided configuration", { height: 1, fg: "#bae6fd" });
+  addText(renderer, header, title, { height: 1, fg: "#ffffff" });
+  addText(renderer, header, description, { height: 1, fg: "#e0f2fe", truncate: true });
+  const panel = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Choose an option ", padding: 1, flexDirection: "column" });
+  root.add(panel);
   const select = new SelectRenderable(renderer, {
     options,
     flexGrow: 1,
@@ -45,8 +50,8 @@ export function buildSelectionScreen(
     wrapSelection: true,
     showDescription: true,
   });
-  root.add(select);
-  addText(renderer, root, "↑/↓ navigate  Enter select  Esc/q back", { height: 1, fg: COLORS.muted });
+  panel.add(select);
+  addText(renderer, root, ` ${options.length} option${options.length === 1 ? "" : "s"} available   ·   ↑/↓ navigate   Enter select   Esc/q back`, { height: 1, fg: COLORS.muted });
   select.focus();
   return select;
 }
@@ -69,10 +74,11 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
     `Mode      ${state.mode}`,
     `Provider  ${state.provider}`,
     `Model     ${state.model}`,
+    `Thinking  ${state.thinking}`,
     `Gates     ${state.activeGates} active · ${state.proposedGates} proposed`,
     `Guides    ${state.references}`,
   ].join("\n");
-  addText(renderer, sidebar, status, { height: 7, fg: state.initialized ? COLORS.success : COLORS.muted, truncate: true });
+  addText(renderer, sidebar, status, { height: 8, fg: state.initialized ? COLORS.success : COLORS.muted, truncate: true });
   const select = new SelectRenderable(renderer, {
     options,
     flexGrow: 1,
@@ -98,29 +104,44 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
 
 export interface OperationScreen {
   append: (chunk: string) => void;
-  finish: (message: string) => void;
+  finish: (message: string, successful?: boolean) => void;
 }
 
 export function buildOperationScreen(renderer: CliRenderer, title: string): OperationScreen {
   const root = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%", backgroundColor: COLORS.background, padding: 1, gap: 1 });
   renderer.root.add(root);
-  addText(renderer, root, title, { height: 1, fg: COLORS.accent });
-  addText(renderer, root, "HarnessME is running inside the dashboard. Live output appears below.", { height: 1, fg: COLORS.muted });
+  const header = new BoxRenderable(renderer, { height: 4, backgroundColor: "#075985", paddingX: 2, flexDirection: "column" });
+  root.add(header);
+  addText(renderer, header, "HarnessME  ·  Operation in progress", { height: 1, fg: "#bae6fd" });
+  addText(renderer, header, title, { height: 1, fg: "#ffffff" });
+  const progress = addText(renderer, header, "○ Preparing operation…", { height: 1, fg: "#e0f2fe" });
   const outputBox = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Operation output ", padding: 1, overflow: "hidden" });
   root.add(outputBox);
   const output = addText(renderer, outputBox, "Starting…", { width: "100%", height: "100%", fg: COLORS.text, wrapMode: "char" });
   const footer = addText(renderer, root, "Please wait…", { height: 1, fg: COLORS.muted });
   const lines: string[] = [];
   const append = (chunk: string): void => {
-    lines.push(...chunk.replace(/\r/g, "").split("\n"));
+    const nextLines = chunk.replace(/\r/g, "").split("\n");
+    lines.push(...nextLines);
+    for (const line of nextLines) {
+      const match = line.match(/[✓…]\s*\[(\d+)\/(\d+)\]\s*(.+)/u);
+      if (!match?.[1] || !match[2]) continue;
+      const current = Number(match[1]);
+      const total = Number(match[2]);
+      const filled = Math.max(1, Math.min(18, Math.round((current / total) * 18)));
+      progress.content = `${"●".repeat(filled)}${"○".repeat(18 - filled)}  ${current}/${total}  ${match[3]}`;
+    }
     if (lines.length > 180) lines.splice(0, lines.length - 180);
     output.content = lines.join("\n").trim() || "Starting…";
     footer.content = "Operation running…";
   };
   return {
     append,
-    finish(message: string): void {
+    finish(message: string, successful = true): void {
       footer.content = message;
+      progress.content = successful
+        ? "●".repeat(18) + "  Complete"
+        : "✗  Operation failed — review the output above";
     },
   };
 }

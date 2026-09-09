@@ -26,12 +26,21 @@ export default defineCommand({
   meta: { name: "refresh", description: "Reanalyze the repository and refresh generated harness guidance" },
   args: {
     deterministic: { type: "boolean", description: "Refresh with deterministic analysis only" },
+    details: { type: "string", description: "Optional maintainer context for the refreshed harness (domain rules, constraints, or risks)" },
+    "extra-prompt": { type: "string", description: "Deprecated alias for --details" },
     root: { type: "string", description: "Repository root", valueHint: "path" },
   },
   async run({ args }) {
     const root = projectRoot(args.root);
     const base = harnessDir(root);
     const previous = await readFacts(root);
+    const suppliedDetails = [args.details, args.extraPrompt]
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .map((value) => value.trim());
+    if (suppliedDetails.length) {
+      previous.directives = `${previous.directives.trimEnd()}\n\n## ${new Date().toISOString().slice(0, 10)} — Maintainer project context\n\n${suppliedDetails.join("\n\n")}\n`;
+      await atomicWrite(join(base, "facts", "directives.md"), previous.directives);
+    }
     const progress = createProgress(previous.config.analysis.aiFallback && !args.deterministic ? 7 : 5);
     progress.step("Loading maintainer directives, approvals, and pending updates");
     progress.step("Reanalyzing source, documentation, configuration, and history");

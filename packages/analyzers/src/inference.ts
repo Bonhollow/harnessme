@@ -131,8 +131,12 @@ function codexRuntime(config: AiReviewConfig): InferenceRuntime {
         await writeFile(schemaPath, JSON.stringify(schema), "utf8");
         const args = ["exec", "--ephemeral", "--sandbox", "read-only", "--skip-git-repo-check", "--output-schema", schemaPath, "--output-last-message", outputPath, "-C", directory];
         if (config.model) args.push("--model", config.model);
+        if (config.reasoningEffort) args.push("-c", `model_reasoning_effort=${config.reasoningEffort}`);
         args.push("-");
-        const result = await run("codex", args, directory, prompt(system, input));
+        // Deep repository analysis and council review can legitimately exceed
+        // two minutes on large context windows. Keep the process bounded while
+        // allowing the selected reasoning effort to finish.
+        const result = await run("codex", args, directory, prompt(system, input), 600_000);
         if (result.code !== 0) throw new Error(`Codex inference failed: ${result.stderr.trim().slice(-500)}`);
         return parseJsonText(await readFile(outputPath, "utf8"));
       } finally {
@@ -150,7 +154,7 @@ function claudeRuntime(config: AiReviewConfig): InferenceRuntime {
       try {
         const args = ["-p", "--output-format", "json", "--json-schema", JSON.stringify(schema), "--permission-mode", "plan"];
         if (config.model) args.push("--model", config.model);
-        const result = await run("claude", args, directory, prompt(system, input));
+        const result = await run("claude", args, directory, prompt(system, input), 600_000);
         if (result.code !== 0) throw new Error(`Claude Code inference failed: ${result.stderr.trim().slice(-500)}`);
         const payload = parseJsonText(result.stdout) as { structured_output?: unknown; result?: string };
         return payload.structured_output ?? (typeof payload.result === "string" ? parseJsonText(payload.result) : payload);
@@ -172,7 +176,7 @@ function cursorRuntime(config: AiReviewConfig, command = "cursor-agent"): Infere
         const args = ["--print", "--mode", "ask", "--output-format", "json", "--trust", "--workspace", directory];
         if (config.model) args.push("--model", config.model);
         args.push("Read input.txt and return only JSON matching its OUTPUT JSON SCHEMA. Do not modify files or run commands.");
-        const result = await run(command, args, directory);
+        const result = await run(command, args, directory, "", 600_000);
         if (result.code !== 0) throw new Error(`Cursor inference failed: ${result.stderr.trim().slice(-500)}`);
         const payload = parseJsonText(result.stdout) as { result?: string; structured_output?: unknown };
         return payload.structured_output ?? (typeof payload.result === "string" ? parseJsonText(payload.result) : payload);

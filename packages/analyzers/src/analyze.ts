@@ -133,6 +133,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   const importsByFile = new Map<string, string[]>();
   let inferredArchitecture: Array<{ statement: string; path: string; line: number }> = [];
   let aiInputs: AnalysisResult["aiInputs"];
+  let authorContext: string | undefined;
   let inferredConflicts: NonNullable<AnalysisResult["documentationConflicts"]> = [];
 
   for (const relativePath of files) {
@@ -198,6 +199,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
       inferredArchitecture = fallback.architecture;
       inferredConflicts = fallback.conflicts;
       aiInputs = fallback.inputs;
+      authorContext = fallback.authorContext;
     } catch (error) {
       if (!(error instanceof InferenceUnavailableError) || options.aiFallback.provider !== "auto") throw error;
       warnings.push(`${error.message} Continuing with deterministic analysis.`);
@@ -288,6 +290,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     hotspots,
     warnings,
     aiInputs,
+    authorContext,
     sourceFiles: [...new Set(files.map(posixPath))].sort(),
     commands: packageData.commands,
     documentationConflicts: [...documentation.conflicts, ...inferredConflicts]

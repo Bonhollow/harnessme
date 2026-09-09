@@ -14,7 +14,13 @@ import { configureInference, removeHarnessState, resolveInferenceChoice, runDash
 import { loadDashboardState } from "./state.js";
 import { buildDashboard, buildOperationScreen, buildSelectionScreen } from "./view.js";
 
-interface Action { label: string; description: string; run: (onOutput: OperationOutput) => Promise<void> }
+type Operation = (onOutput: OperationOutput) => Promise<void>;
+
+interface Action {
+  label: string;
+  description: string;
+  prepare: () => Promise<Operation | undefined>;
+}
 
 async function selectOption(
   title: string,
@@ -140,32 +146,37 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
-      { label: "Refresh with AI", description: "Use the configured provider and model.", run: async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false }, onOutput) },
-      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", run: async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: true }, onOutput) },
-      { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", run: async (onOutput) => {
+      { label: "Refresh with AI", description: "Use the configured provider and model.", prepare: async () => async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false }, onOutput) },
+      { label: "Refresh deterministically", description: "Run without model inference for this refresh.", prepare: async () => async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: true }, onOutput) },
+      { label: "Change provider / model", description: "Select inference settings, then regenerate the harness.", prepare: async () => {
         const choice = await chooseInference();
-        if (!choice) return;
-        await configureInference(root, choice);
-        await runDashboardCommand(root, refreshCommand, { deterministic: choice.deterministic }, onOutput);
+        if (!choice) return undefined;
+        return async (onOutput) => {
+          await configureInference(root, choice);
+          await runDashboardCommand(root, refreshCommand, { deterministic: choice.deterministic }, onOutput);
+        };
       } },
-      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", run: async (onOutput) => runDashboardCommand(root, qualityCommand, {}, onOutput) },
-      { label: "Critical gates", description: "List active and AI-proposed protected paths.", run: async (onOutput) => runDashboardCommand(root, listCriticalCommand, {}, onOutput) },
-      { label: "Activate AI-proposed gate", description: "Protect a recognized core path and require pre-edit confirmation.", run: async (onOutput) => {
+      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", prepare: async () => async (onOutput) => runDashboardCommand(root, qualityCommand, {}, onOutput) },
+      { label: "Critical gates", description: "List active and AI-proposed protected paths.", prepare: async () => async (onOutput) => runDashboardCommand(root, listCriticalCommand, {}, onOutput) },
+      { label: "Activate AI-proposed gate", description: "Protect a recognized core path and require pre-edit confirmation.", prepare: async () => {
         const glob = await chooseGate(root, "proposed", "activate");
-        if (glob) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
+        return glob ? async (onOutput) => runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput) : undefined;
       } },
-      { label: "Remove critical gate", description: "Remove protection from an active core path after confirmation.", run: async (onOutput) => {
+      { label: "Remove critical gate", description: "Remove protection from an active core path after confirmation.", prepare: async () => {
         const glob = await chooseGate(root, "active", "remove");
-        if (glob) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+        return glob ? async (onOutput) => runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput) : undefined;
       } },
-      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", run: async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
-      { label: "Delete harness state", description: "Remove .harnessme after confirmation.", run: async () => { if (await confirmRemoval()) await removeHarnessState(root); } },
-      { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
+      { label: "Sync integrations", description: "Regenerate provider files from stored facts.", prepare: async () => async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
+      { label: "Delete harness state", description: "Remove .harnessme after confirmation.", prepare: async () => {
+        if (!await confirmRemoval()) return undefined;
+        return async () => removeHarnessState(root);
+      } },
+      { label: "Exit", description: "Close the dashboard.", prepare: async () => { running = false; return undefined; } },
     ] : [
-      { label: "Initialize", description: "Analyze this repository and create its harness.", run: async (onOutput) => {
+      { label: "Initialize", description: "Analyze this repository and create its harness.", prepare: async () => {
         const choice = await chooseInference();
-        if (!choice) return;
-        await runDashboardCommand(root, initCommand, {
+        if (!choice) return undefined;
+        return async (onOutput) => runDashboardCommand(root, initCommand, {
           provider: choice.provider ?? "auto",
           deterministic: choice.deterministic,
           model: choice.model,
@@ -176,10 +187,11 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
           criticalApprovers: "developer",
         }, onOutput);
       } },
-      { label: "Exit", description: "Close the dashboard.", run: async () => { running = false; } },
+      { label: "Exit", description: "Close the dashboard.", prepare: async () => { running = false; return undefined; } },
     ];
     const selected = await dashboardSelection(root, actions);
     if (!selected) break;
-    if (running && selected.label !== "Exit") await showOperation(selected.label, selected.run);
+    const operation = await selected.prepare();
+    if (running && operation) await showOperation(selected.label, operation);
   }
 }

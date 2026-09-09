@@ -6,14 +6,14 @@ import {
 } from "@opentui/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
-import qualityCommand from "../commands/quality.js";
 import syncCommand from "../commands/sync.js";
 import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
 import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
 import { manageGates } from "./gates.js";
 import { collectProjectDetails } from "./details.js";
+import { loadQualityReport } from "./quality.js";
 import { loadDashboardState } from "./state.js";
-import { buildDashboard, buildOperationScreen, buildSelectionScreen } from "./view.js";
+import { buildDashboard, buildOperationScreen, buildQualityReportScreen, buildSelectionScreen } from "./view.js";
 
 type Operation = (onOutput: OperationOutput) => Promise<void>;
 
@@ -125,6 +125,14 @@ async function showOperation(title: string, operation: (onOutput: OperationOutpu
   renderer.destroy();
 }
 
+async function showQualityReport(root: string): Promise<void> {
+  const report = await loadQualityReport(root);
+  const renderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
+  buildQualityReportScreen(renderer, report);
+  await new Promise<void>((resolve) => renderer.keyInput.once("keypress", () => resolve()));
+  renderer.destroy();
+}
+
 async function confirmRemoval(): Promise<boolean> {
   const selected = await selectOption(
     "Delete HarnessME state?",
@@ -181,7 +189,10 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
           await runDashboardCommand(root, refreshCommand, { deterministic: choice.deterministic }, onOutput);
         };
       } },
-      { label: "Quality report", description: "Inspect evidence-backed harness quality checks.", prepare: async () => async (onOutput) => runDashboardCommand(root, qualityCommand, {}, onOutput) },
+      { label: "Quality report", description: "Open an actionable health view with score, gaps, and next steps.", prepare: async () => {
+        await showQualityReport(root);
+        return undefined;
+      } },
       { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
         const plan = await manageGates(root);
         if (!plan || (!plan.activate.length && !plan.remove.length && !plan.add)) return undefined;

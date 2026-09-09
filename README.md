@@ -1,8 +1,44 @@
-# HarnessME
+<p align="center">
+  <img src="assets/logo.png" width="112" alt="HarnessME shield logo">
+</p>
 
-HarnessME analyzes a repository and turns its real structure and conventions into shared instructions for AI coding agents. It generates `AGENTS.md` and provider-specific files, detects drift, identifies high-impact files from change frequency and import fan-in, and gates invasive changes to critical paths.
+<h1 align="center">HarnessME</h1>
 
-It is a local, scriptable CLI: no account or hosted service required.
+<p align="center">
+  Turn a repository into a safe, specific operating contract for AI coding agents.
+</p>
+
+HarnessME reads the structure and conventions that already exist in a repository, then produces a maintained `AGENTS.md`, scoped module guides, and agent-specific integrations. It tells agents where to make changes, what must remain true, how to validate their work, and when they must ask a developer before touching a core area.
+
+## Why HarnessME?
+
+Generic instructions make an agent guess. HarnessME makes the repository legible: it grounds guidance in real files and validation commands, highlights coupled changes, detects documentation drift, and protects high-impact paths with an explicit human gate. It is a local, scriptable CLI—no hosted service or HarnessME account required.
+
+## Quick start
+
+Requires Node.js 26.4 or newer on Windows, macOS, or Linux.
+
+```bash
+npm install -g harnessme
+cd your-repository
+harnessme init
+```
+
+`init` selects an available signed-in AI framework, lets you choose a model, analyzes the repository, and writes the harness. Run `harnessme` with no subcommand afterward to open the dashboard.
+
+<p align="center">
+  <img src="assets/dashboard.png" alt="HarnessME quality intelligence dashboard" width="800">
+  <br>
+  <em>The terminal dashboard turns quality checks into an actionable readiness view.</em>
+</p>
+
+## What you get
+
+- A concise root `AGENTS.md` that directs agents before they edit.
+- Nested module guides with responsibilities, extension seams, invariants, coupled-change impact, and exact validation.
+- `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
+- Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
+- A dashboard and `harnessme quality` scorecard that show what is healthy, what is missing, and the next best action.
 
 ## Install
 
@@ -21,7 +57,7 @@ For model-assisted generation, install and sign in to at least one supported fra
 
 ## Use
 
-Run `harnessme` without a subcommand to open the full-screen terminal dashboard. It shows the current mode, provider, model, thinking level, quality score, gate counts, scoped-guide count, and a live preview of `AGENTS.md`. Use the dashboard to initialize or refresh the harness, switch inference provider/model, run quality checks, synchronize integrations, or remove HarnessME state. Guided initialization selects provider, model, optional Codex thinking level, review depth, optional project context, and confirms the resulting plan before writing; refresh also offers an optional context field. Long-running operations show their current phase and a live output panel. Use the context field for domain rules, architecture constraints, team practices, or known risks that code cannot reveal. The Critical Gate Manager provides checkbox-style selection for multiple paths, bulk activation/removal, and a three-step form for adding a custom protected path. Arrow keys navigate, Enter or Space toggles a gate, `a` selects all, `s` applies a gate plan, `n` adds a gate, and Escape or `q` exits.
+Run `harnessme` without a subcommand to open the full-screen terminal dashboard. It shows the current mode, provider, model, thinking level, quality score, gate counts, scoped-guide count, and a live preview of `AGENTS.md`. The **Quality report** opens a focused scorecard for every quality dimension, readiness context, and the next best action when something needs attention. Use the dashboard to initialize or refresh the harness, switch inference provider/model, synchronize integrations, or remove HarnessME state. Guided initialization selects provider, model, optional Codex thinking level, review depth, optional project context, and confirms the resulting plan before writing; refresh also offers an optional context field. Long-running operations show their current phase and a live output panel. Use the context field for domain rules, architecture constraints, team practices, or known risks that code cannot reveal. The Critical Gate Manager provides checkbox-style selection for multiple paths, bulk activation/removal, and a three-step form for adding a custom protected path. Arrow keys navigate, Enter or Space toggles a gate, `a` selects all, `s` applies a gate plan, `n` adds a gate, and Escape or `q` exits.
 
 Initialize HarnessME from the root of an existing repository:
 
@@ -34,6 +70,9 @@ By default, `init` resolves the first available signed-in inference CLI and writ
 This creates the facts store in `.harnessme/`, a concise root `AGENTS.md`, a navigable architecture and critical-change agent pack under `.harnessme/agent-pack/`, concern guides under `.harnessme/references/`, and detailed nested `AGENTS.md` files beside the modules they govern. It also creates provider files, a harness-quality report, CODEOWNERS, CI configuration, and a cross-platform Lefthook configuration. Run `harnessme hooks install` afterward when you want to activate the local Git gate.
 
 Long-running commands display a phase-by-phase progress bar describing the current operation. When output is redirected or running in CI, the same updates are emitted as stable `progress:` log lines.
+
+<details>
+<summary><strong>How HarnessME creates and reviews the harness</strong></summary>
 
 ## How the harness is created
 
@@ -95,6 +134,20 @@ harnessme init --ai-preview
 Use `--ai-include "src/**"`, `--ai-exclude "src/generated/**"`, or add patterns to `.harnessmeignore` for finer control. Use `--deterministic` to disable model inference for offline or privacy-sensitive runs.
 
 After the repository changes, run `harnessme refresh`. It reuses the provider, model, privacy filters, and reviewer stored during initialization, preserves maintainer directives, approved critical records, verified changes, and pending notes, and rewrites only HarnessME-managed guidance. Pass `--deterministic` for an offline refresh.
+
+</details>
+
+## Everyday commands
+
+```bash
+harnessme                  # open the interactive dashboard
+harnessme refresh          # update the harness after repository changes
+harnessme quality          # see quality dimensions and next best action
+harnessme check --ci       # fail CI when facts have drifted
+```
+
+<details>
+<summary><strong>Full command reference and critical-change workflow</strong></summary>
 
 ## Command reference
 
@@ -161,6 +214,8 @@ harnessme critical remove "src/core.ts"
 ```
 
 For registered paths, generated agent instructions require explicit developer confirmation before editing. Claude Code receives a native permission prompt; the Git hook and CI reject commits unless an approved record matches the exact staged/committed content and ships with the updated critical index. CODEOWNERS remains the authoritative team-review control on GitHub.
+
+</details>
 
 ## Behind the scenes
 

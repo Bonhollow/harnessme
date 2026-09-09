@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HarnessME logo</title>
+  <desc id="desc">A shield-shaped H made from connected teal and blue paths.</desc>
+  <defs>
+    <linearGradient id="surface" x1="80" y1="64" x2="432" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E7490"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="172" y1="146" x2="344" y2="366" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ECFEFF"/>
+      <stop offset="1" stop-color="#BAE6FD"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#surface)" d="M256 36 432 104v132c0 111-69 202-176 240C149 438 80 347 80 236V104L256 36Z"/>
+  <path fill="#67E8F9" opacity=".2" d="M256 36 432 104v132c0 111-69 202-176 240V36Z"/>
+  <path fill="url(#mark)" d="M164 148h66v72h52v-72h66v216h-66v-82h-52v82h-66V148Z"/>
+  <path fill="#0F172A" opacity=".16" d="M230 220h52v62h-52z"/>
+  <circle cx="382" cy="128" r="20" fill="#A5F3FC"/>
+</svg>

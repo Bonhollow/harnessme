@@ -14,6 +14,7 @@ import {
   exists,
   harnessDir,
   readFacts,
+  recordQualitySnapshot,
   readText,
   writeJson,
   writeFacts,
@@ -388,6 +389,7 @@ export default defineCommand({
     await writeJson(join(base, "facts", "quality.json"), quality);
     progress.step("Generating instructions and governance integrations");
     const result = await syncHarness(root);
+    await recordQualitySnapshot(root, quality, "init");
     progress.done("Harness created");
     for (const message of analysis.warnings) warn(message);
     info(`Initialized HarnessME with targets: ${result.targets.join(", ")}.`);

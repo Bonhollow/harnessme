@@ -125,7 +125,15 @@ describe("CLI", () => {
     ]);
     const quality = await exec(process.execPath, [cli, "quality", "--root", root]);
     expect(quality.stdout).toContain("Harness quality:");
+    expect(quality.stdout).toContain("History: 2 assessment(s)");
     expect(quality.stdout).toContain("documentation/code conflict");
+    expect(JSON.parse(await readFile(join(root, ".harnessme", "facts", "quality-history.json"), "utf8"))).toEqual(expect.objectContaining({
+      schemaVersion: 1,
+      snapshots: [
+        expect.objectContaining({ trigger: "init", dimensions: expect.arrayContaining([expect.objectContaining({ id: "evidence" })]) }),
+        expect.objectContaining({ trigger: "refresh", dimensions: expect.arrayContaining([expect.objectContaining({ id: "navigation" })]) }),
+      ],
+    }));
   }, 30_000);
 
   it("requires explicit deterministic mode when auto finds no inference CLI", async () => {

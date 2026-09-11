@@ -4,7 +4,7 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
-import { planQualityRemediations, type QualityRemediation } from "@harnessme/core";
+import { planQualityRemediations, recordQualitySnapshot, type QualityRemediation } from "@harnessme/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import syncCommand from "../commands/sync.js";
@@ -174,6 +174,7 @@ function withQualityVerification(root: string, plan: QualityRemediation, operati
     onOutput(`Target: ${plan.title}\nProjected quality: ${plan.currentScore} → up to ${plan.projectedScore}/100\n`);
     await operation(onOutput);
     const after = await loadQualityReport(root);
+    await recordQualitySnapshot(root, after.quality, "remediation");
     const resolved = !after.quality.findings.some((finding) => finding.checkId === plan.id);
     const delta = after.quality.score - plan.currentScore;
     onOutput(`\nQuality verification: ${plan.currentScore} → ${after.quality.score}/100 (${delta >= 0 ? "+" : ""}${delta})\n`);

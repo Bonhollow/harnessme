@@ -8,6 +8,17 @@ import type { DashboardState } from "./state.js";
 import type { QualityReport } from "./quality.js";
 import { addText, COLORS } from "./theme.js";
 
+function trendLabel(delta: number): string {
+  if (delta > 0) return `↑ +${delta}`;
+  if (delta < 0) return `↓ ${delta}`;
+  return "→ 0";
+}
+
+function scoreSparkline(scores: number[]): string {
+  const bars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  return scores.map((score) => bars[Math.min(bars.length - 1, Math.floor((score / 101) * bars.length))]).join("");
+}
+
 export function buildSelectionScreen(
   renderer: CliRenderer,
   title: string,
@@ -75,7 +86,8 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
     const filled = Math.round((score / 100) * 18);
     const qualityCard = new BoxRenderable(renderer, { border: true, borderColor: scoreColor, title: ` Quality · ${state.quality.grade} `, paddingX: 1, height: 6, flexDirection: "column" });
     sidebar.add(qualityCard);
-    addText(renderer, qualityCard, `${score}/100  ·  confidence ${state.quality.confidence}%`, { height: 1, fg: scoreColor });
+    const trend = state.qualityTrend ? `  ·  ${trendLabel(state.qualityTrend.delta)}` : "";
+    addText(renderer, qualityCard, `${score}/100  ·  confidence ${state.quality.confidence}%${trend}`, { height: 1, fg: scoreColor });
     addText(renderer, qualityCard, `${"█".repeat(filled)}${"░".repeat(18 - filled)}`, { height: 1, fg: scoreColor });
     const weakest = [...state.quality.dimensions].sort((left, right) => left.score - right.score).slice(0, 2);
     for (const dimension of weakest) {
@@ -140,7 +152,8 @@ export function buildQualityReportScreen(renderer: CliRenderer, report: QualityR
   const header = new BoxRenderable(renderer, { height: 5, backgroundColor: COLORS.blue, paddingX: 2, flexDirection: "column" });
   root.add(header);
   addText(renderer, header, "HarnessME  ·  Quality intelligence", { height: 1, fg: "#bae6fd" });
-  addText(renderer, header, `${score}/100  ${report.quality.grade.toUpperCase()}  ·  assessment confidence ${report.quality.confidence}%`, { height: 1, fg: scoreColor });
+  const trend = report.trend ? `  ·  ${trendLabel(report.trend.delta)} since previous` : "";
+  addText(renderer, header, `${score}/100  ${report.quality.grade.toUpperCase()}  ·  assessment confidence ${report.quality.confidence}%${trend}`, { height: 1, fg: scoreColor });
   addText(renderer, header, `${"█".repeat(filled)}${"░".repeat(28 - filled)}  ${report.quality.checks.filter((check) => check.passed).length}/${report.quality.checks.length} checks at target`, { height: 1, fg: "#e0f2fe" });
   const body = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row", gap: 1 });
   root.add(body);
@@ -161,6 +174,10 @@ export function buildQualityReportScreen(renderer: CliRenderer, report: QualityR
     const color = metric.percentage >= 80 ? COLORS.success : metric.percentage >= 50 ? COLORS.warning : COLORS.danger;
     addText(renderer, coverage, `${metric.label}  ${metric.value}/${metric.target}`, { height: 1, fg: color, truncate: true });
     addText(renderer, coverage, `${"▓".repeat(bars)}${"░".repeat(width - bars)} ${metric.percentage}%  ${metric.detail}`, { height: 1, fg: color, truncate: true });
+  }
+  if (report.trend) {
+    addText(renderer, coverage, `History  ${report.trend.snapshots} assessments · range ${report.trend.lowestScore}-${report.trend.bestScore}`, { height: 1, fg: COLORS.accent, truncate: true });
+    addText(renderer, coverage, `${scoreSparkline(report.trend.series)}  ${report.trend.series.join(" → ")}`, { height: 1, fg: report.trend.delta < 0 ? COLORS.danger : COLORS.success, truncate: true });
   }
   const findings = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.border, title: " Priority findings ", padding: 1, flexDirection: "column" });
   body.add(findings);

@@ -8,6 +8,7 @@ import {
   exists,
   harnessDir,
   readFacts,
+  recordQualitySnapshot,
   writeFacts,
   writeJson,
   writeYaml,
@@ -238,6 +239,7 @@ export default defineCommand({
     await writeJson(join(base, "facts", "quality.json"), quality);
     progress.step("Synchronizing agent and governance artifacts");
     const result = await syncHarness(root);
+    await recordQualitySnapshot(root, quality, "refresh");
     progress.done("Harness refresh complete");
     info(`Refreshed ${result.files.length} managed artifact(s); maintainer directives, approvals, verified changes, and pending notes were preserved.`);
     info(`Harness quality: ${quality.score}/100.`);

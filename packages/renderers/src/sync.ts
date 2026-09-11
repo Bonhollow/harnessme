@@ -17,13 +17,16 @@ import { applyRuler } from "./ruler.js";
 import { renderGovernance } from "./governance.js";
 import { referenceDocuments } from "./reference-pack.js";
 import { syncGuidance } from "./guidance/sync.js";
+import { captureGeneration } from "./generation-history.js";
 
 export interface SyncResult {
   files: string[];
   targets: string[];
 }
 
-export async function syncHarness(root: string, targetIds?: string[]): Promise<SyncResult> {
+export async function syncHarness(root: string, targetIds?: string[], options: { archive?: boolean } = {}): Promise<SyncResult> {
+  const archive = options.archive !== false;
+  if (archive) await captureGeneration(root, "before-sync");
   const facts = await readFacts(root);
   const selected = resolveProviders(targetIds?.length ? targetIds : facts.config.targets);
   const agentsPath = join(root, "AGENTS.md");
@@ -127,5 +130,7 @@ export async function syncHarness(root: string, targetIds?: string[]): Promise<S
 
   // Validate once more at render time so hand-edited fact files fail loudly.
   await writeYaml(join(root, ".harnessme", "harnessme.yaml"), facts.config);
-  return { files: [...new Set(files)].sort(), targets: selected.map((provider) => provider.id) };
+  const result = { files: [...new Set(files)].sort(), targets: selected.map((provider) => provider.id) };
+  if (archive) await captureGeneration(root, "sync", result.files);
+  return result;
 }

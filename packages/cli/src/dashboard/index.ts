@@ -8,6 +8,7 @@ import { planQualityRemediations, recordQualitySnapshot, type QualityRemediation
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import syncCommand from "../commands/sync.js";
+import { listGenerations, previewGenerationRollback, previewHarnessSync, rollbackGeneration } from "@harnessme/renderers";
 import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
 import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
 import { manageGates } from "./gates.js";
@@ -182,6 +183,35 @@ function withQualityVerification(root: string, plan: QualityRemediation, operati
   };
 }
 
+function generationChangeSummary(changes: Awaited<ReturnType<typeof previewHarnessSync>>): string {
+  if (!changes.length) return "No generated-document changes detected.";
+  const lines = changes.slice(0, 8).map((change) => `${change.status.toUpperCase()} ${change.path} (+${change.additions} -${change.deletions})`);
+  if (changes.length > lines.length) lines.push(`…and ${changes.length - lines.length} more file(s)`);
+  return lines.join("\n");
+}
+
+async function chooseGenerationRollback(root: string): Promise<string | undefined> {
+  const generations = await listGenerations(root);
+  if (!generations.length) {
+    await selectOption("No generation history", "Run a synchronization or refresh before attempting rollback.", [
+      { name: "Return to dashboard", description: "No archived generation is available.", value: false },
+    ]);
+    return undefined;
+  }
+  const selected = await selectOption("Rollback harness", "Choose the generated-document snapshot to restore.", generations.map((generation) => ({
+    name: `${generation.createdAt} · ${generation.reason}`,
+    description: `${generation.files} managed files · ${generation.id}`,
+    value: generation.id,
+  })));
+  if (typeof selected?.value !== "string") return undefined;
+  const preview = await previewGenerationRollback(root, selected.value);
+  const confirmed = await selectOption("Confirm rollback", generationChangeSummary(preview.changes), [
+    { name: "Restore generation", description: "Archive the current generated files, then apply this snapshot.", value: true },
+    { name: "Cancel", description: "Return without changing generated files.", value: false },
+  ]);
+  return confirmed?.value === true ? selected.value : undefined;
+}
+
 async function confirmRemoval(): Promise<boolean> {
   const selected = await selectOption(
     "Delete HarnessME state?",
@@ -300,6 +330,17 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         };
       } },
       { label: "Sync integrations", description: "Regenerate provider files from stored facts.", prepare: async () => async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
+      { label: "Preview generated changes", description: "Render in an isolated workspace and show file-level changes without writing.", prepare: async () => async (onOutput) => {
+        const changes = await previewHarnessSync(root);
+        onOutput(`${generationChangeSummary(changes)}\n`);
+      } },
+      { label: "Rollback harness generation", description: "Preview and restore an archived set of managed generated documents.", prepare: async () => {
+        const generationId = await chooseGenerationRollback(root);
+        return generationId ? async (onOutput) => {
+          const result = await rollbackGeneration(root, generationId);
+          onOutput(`Restored ${result.generation.id}\n${generationChangeSummary(result.changes)}\n`);
+        } : undefined;
+      } },
       { label: "Delete harness state", description: "Remove .harnessme after confirmation.", prepare: async () => {
         if (!await confirmRemoval()) return undefined;
         return async () => removeHarnessState(root);

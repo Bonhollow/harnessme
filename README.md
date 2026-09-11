@@ -44,6 +44,7 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 4. **Quality intelligence, history, and remediation** — compare evidence, navigation, operations, documentation, and governance; inspect score trends across initialization, refreshes, and fixes; then select any failed check to see its recoverable points, projected score, recommended workflow, and verified result.
 5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
 6. **Knowledge Graph** — stay inside the terminal and press `G` to switch between the structured relationship view and a lightweight force-directed map.
+7. **Generation safety** — preview generated-document diffs in an isolated workspace and restore one of the latest 20 local snapshots without rolling back source code or maintainer facts.
 
 ### CLI commands
 
@@ -53,6 +54,8 @@ Use commands when scripting, running CI, or when you already know the operation 
 harnessme init             # create a harness non-interactively or with prompts
 harnessme refresh          # update it after repository changes
 harnessme quality          # report quality dimensions and next best action
+harnessme sync --preview   # preview generated-document changes without writing
+harnessme generation list  # inspect local generated-document snapshots
 harnessme check --ci       # fail CI when repository facts have drifted
 harnessme feature list     # inspect semantic features in the committed graph
 ```
@@ -153,7 +156,10 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme init` | Analyze a repository and create the harness. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--thinking-level low|medium|high` (Codex), `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--details <text>` |
 | `harnessme scan` | Report analysis drift without writing. | No command-specific options. |
 | `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
-| `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>` |
+| `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>`, `--preview` |
+| `harnessme generation list` | List the latest local generated-document snapshots. | — |
+| `harnessme generation preview` | Render in an isolated temporary workspace and show the pending file-level diff. | `--targets <comma-list>` |
+| `harnessme generation rollback [id]` | Restore a generated-document snapshot, defaulting to the previous generation. | `--preview` shows the rollback diff without writing. |
 | `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
 | `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail if committed facts have drifted. | `--ci` |
@@ -178,6 +184,8 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme feature unlink <from> <to>` | Remove or exclude a feature relationship. | `--kind depends-on\|related-to`. |
 
 `--provider` and `--review-provider` select inference runtimes. `--targets` selects generated instruction formats; the two settings are intentionally independent. The HTTP provider requires `--ai-endpoint` and `--model`; HTTP review requires `--review-ai-endpoint` and `--review-model`.
+
+Generation snapshots are local, Git-ignored, capped at 20, and contain only wholly generated documents. Rollback preserves the current pending-update section and never replaces merged maintainer configuration such as CODEOWNERS, Lefthook, or provider settings.
 
 Keep the harness current:
 

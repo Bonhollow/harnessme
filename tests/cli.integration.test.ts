@@ -134,6 +134,14 @@ describe("CLI", () => {
         expect.objectContaining({ trigger: "refresh", dimensions: expect.arrayContaining([expect.objectContaining({ id: "navigation" })]) }),
       ],
     }));
+    const generations = await exec(process.execPath, [cli, "generation", "list", "--root", root]);
+    expect(generations.stdout).toContain("before-sync");
+    expect(generations.stdout).toContain("sync");
+    const previewSource = agents.replace("## Project purpose", "## Project purpose\n\nTemporary preview-only drift.");
+    await writeFile(join(root, "AGENTS.md"), previewSource);
+    const preview = await exec(process.execPath, [cli, "sync", "--preview", "--root", root]);
+    expect(preview.stdout).toContain("MODIFIED AGENTS.md");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toBe(previewSource);
   }, 30_000);
 
   it("requires explicit deterministic mode when auto finds no inference CLI", async () => {

@@ -2,5 +2,6 @@ export * from "./providers.js";
 export * from "./agents-md.js";
 export * from "./reference-pack.js";
 export * from "./sync.js";
+export * from "./generation-history.js";
 export * from "./governance.js";
 export * from "./guidance/index.js";

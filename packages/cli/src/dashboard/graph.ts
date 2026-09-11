@@ -1,7 +1,8 @@
 import { BoxRenderable, CliRenderEvents, SelectRenderable, SelectRenderableEvents, createCliRenderer, type SelectOption } from "@opentui/core";
 import { readFacts } from "@harnessme/core";
-import { createGraphScene } from "./graph-scene.js";
+import { createGraphScene, GRAPH_HELP } from "./graph-scene.js";
 import { addText, COLORS } from "./theme.js";
+import { openForceGraph } from "../commands/graph.js";
 
 export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   const graph = (await readFacts(root)).knowledgeGraph;
@@ -55,7 +56,8 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   renderer.on(CliRenderEvents.RESIZE, () => { layout(); render(); });
   render(); select.focus();
   const footer = new BoxRenderable(renderer, { height: 1, paddingX: 2 }); rootBox.add(footer);
-  const help = addText(renderer, footer, "↑/↓ node  ←/→ follow  Backspace history  e evidence  m manage  +/- radius  / search  f filter  i reverse  Esc/q back", { height: 1, fg: COLORS.muted });
+  const help = addText(renderer, footer, GRAPH_HELP, { height: 1, fg: COLORS.muted });
+  let openingForceGraph = false;
   const result = await new Promise<"back" | "manage">((resolve) => renderer.keyInput.on("keypress", (key) => {
     if (searching) {
       key.preventDefault();
@@ -65,7 +67,7 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
       else if (key.sequence.length === 1 && !key.ctrl && !key.meta) query += key.sequence;
       visible = ordered.filter((node) => `${node.label} ${node.id} ${node.path ?? ""}`.toLowerCase().includes(query.toLowerCase()));
       select.options = nodeOptions();
-      help.content = searching ? `Search: ${query || "_"}   Enter accept   Esc clear` : "↑/↓ node   ←/→ relationship   +/- radius   / search   f filter   i reverse   Esc/q back";
+      help.content = searching ? `Search: ${query || "_"}   Enter accept   Esc clear` : GRAPH_HELP;
       render();
     } else if (key.name === "escape" || key.name === "q" || (key.ctrl && key.name === "c")) resolve("back");
     else if (key.name === "m") resolve("manage");
@@ -78,6 +80,20 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     else if (key.name === "+" || key.name === "=") { radius = Math.min(3, radius + 1); render(); }
     else if (key.name === "-") { radius = Math.max(1, radius - 1); render(); }
     else if (key.name === "i") { reverse = !reverse; render(); }
+    else if (key.name === "g" || key.sequence === "G") {
+      key.preventDefault();
+      if (openingForceGraph) return;
+      openingForceGraph = true;
+      help.content = "Opening 3D force view…  Return here for the structured graph";
+      renderer.requestRender();
+      void openForceGraph(root).then(() => {
+        help.content = "3D force view opened  ·  G reopen  ·  structured graph remains active here";
+        renderer.requestRender();
+      }).catch((error: unknown) => {
+        help.content = `Could not open 3D view: ${error instanceof Error ? error.message : String(error)}`;
+        renderer.requestRender();
+      }).finally(() => { openingForceGraph = false; });
+    }
     else if (key.name === "/") { key.preventDefault(); searching = true; query = ""; help.content = "Search: _   Enter accept   Esc clear"; renderer.requestRender(); }
     else if (key.name === "f") {
       filter = filter === "all" ? "semantic" : filter === "semantic" ? "structure" : "all";

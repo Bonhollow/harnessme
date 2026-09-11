@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGraphScene } from "../packages/cli/src/dashboard/graph-scene.js";
+import { createGraphScene, GRAPH_HELP } from "../packages/cli/src/dashboard/graph-scene.js";
 import type { KnowledgeGraph } from "../packages/core/src/schema.js";
 
 const graph: KnowledgeGraph = {
@@ -16,5 +16,9 @@ describe("graph scene", () => {
     expect(createGraphScene(graph, graph.nodes[0]!, 1, false, 96)).toContain("IMPACT");
     expect(createGraphScene(graph, graph.nodes[0]!, 1, false, 96)).toContain("→ auth.ts [implements]");
     expect(createGraphScene(graph, graph.nodes[0]!, 1, false, 60)).toContain("◆ Authentication (feature)");
+  });
+
+  it("advertises the 3D view switch from the structured explorer", () => {
+    expect(GRAPH_HELP).toContain("G 3D view");
   });
 });

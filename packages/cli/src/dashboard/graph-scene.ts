@@ -1,5 +1,7 @@
 import { graphNeighborhood, type KnowledgeEdge, type KnowledgeGraph, type KnowledgeNode } from "../../../core/src/index.js";
 
+export const GRAPH_HELP = "↑/↓ node  ←/→ follow  G 3D view  Backspace history  e evidence  m manage  +/- radius  / search  f filter  i reverse  Esc/q back";
+
 function fit(value: string, width: number): string {
   return value.length > width ? `${value.slice(0, Math.max(0, width - 1))}…` : value.padEnd(width);
 }

@@ -43,7 +43,7 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
 4. **Quality intelligence** — compare evidence, navigation, operations, documentation, and governance with coverage charts and ranked corrective actions.
 5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
-6. **Knowledge Graph** — explore stable feature, module, file, test, documentation, dependency, and protected-path relationships without leaving the terminal.
+6. **Knowledge Graph** — use the fast terminal explorer and press `G` to switch to a lightweight 3D force-directed browser view with search, filters, focus depth, evidence, and source links.
 
 ### CLI commands
 
@@ -55,6 +55,7 @@ harnessme refresh          # update it after repository changes
 harnessme quality          # report quality dimensions and next best action
 harnessme check --ci       # fail CI when repository facts have drifted
 harnessme feature list     # inspect semantic features in the committed graph
+harnessme graph            # open the self-contained 3D force-directed graph
 ```
 
 The complete command and critical-change workflow reference is available further down this README.
@@ -66,7 +67,7 @@ The complete command and critical-change workflow reference is available further
 - `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
 - Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
 - A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, dependency density, test linkage, guide depth, assessment confidence, and ranked findings. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
-- A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and interactive dashboard explorer.
+- A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, terminal explorer, and dependency-free `.harnessme/graph.html` 3D force visualization.
 
 ## Requirements
 
@@ -155,6 +156,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
 | `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>` |
 | `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
+| `harnessme graph` | Generate and open the lightweight 3D force-directed knowledge graph. | `--print` writes and prints the HTML path without opening a browser. |
 | `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail if committed facts have drifted. | `--ci` |
 | `harnessme directive add <text>` | Add a maintainer-authored instruction. | — |

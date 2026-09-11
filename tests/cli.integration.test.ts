@@ -108,9 +108,10 @@ describe("CLI", () => {
 
     const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic", "--details", "The API must remain compatible with external evaluators."]);
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(refreshed.stdout).toContain("Refreshed 12 managed artifact(s)");
+    expect(refreshed.stdout).toContain("Refreshed 13 managed artifact(s)");
     expect(JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8"))).toEqual(expect.objectContaining({ schemaVersion: 1 }));
     expect(await readFile(join(root, ".harnessme", "FEATURES.md"), "utf8")).toContain("# Feature navigation");
+    expect(await readFile(join(root, ".harnessme", "graph.html"), "utf8")).toContain("HarnessME · 3D Graph");
     expect(agents).toContain("preserve this maintainer note");
     expect(agents).toContain("The API must remain compatible with external evaluators.");
     expect(agents).toContain(".harnessme/references/repository-workflow.md");
@@ -124,6 +125,8 @@ describe("CLI", () => {
     const quality = await exec(process.execPath, [cli, "quality", "--root", root]);
     expect(quality.stdout).toContain("Harness quality:");
     expect(quality.stdout).toContain("documentation/code conflict");
+    const graph = await exec(process.execPath, [cli, "graph", "--root", root, "--print"]);
+    expect(graph.stdout.trim()).toBe(join(root, ".harnessme", "graph.html"));
   }, 30_000);
 
   it("requires explicit deterministic mode when auto finds no inference CLI", async () => {

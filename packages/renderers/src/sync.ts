@@ -17,6 +17,7 @@ import { applyRuler } from "./ruler.js";
 import { renderGovernance } from "./governance.js";
 import { referenceDocuments } from "./reference-pack.js";
 import { syncGuidance } from "./guidance/sync.js";
+import { renderForceGraphHtml } from "./force-graph.js";
 
 export interface SyncResult {
   files: string[];
@@ -77,6 +78,8 @@ export async function syncHarness(root: string, targetIds?: string[]): Promise<S
   });
   await writeJson(join(root, ".harnessme", "knowledge-graph.json"), knowledge.graph);
   files.push(".harnessme/knowledge-graph.json");
+  await atomicWrite(join(root, ".harnessme", "graph.html"), renderForceGraphHtml(knowledge.graph));
+  files.push(".harnessme/graph.html");
   const featureDir = join(root, ".harnessme", "features");
   await mkdir(featureDir, { recursive: true });
   const expectedFeatures = new Set(knowledge.documents.filter((document) => document.path.startsWith(".harnessme/features/")).map((document) => document.path.split("/").at(-1)));

@@ -1,6 +1,6 @@
 import { BoxRenderable, CliRenderEvents, FrameBufferRenderable, SelectRenderable, SelectRenderableEvents, createCliRenderer, type SelectOption } from "@opentui/core";
-import { readFacts } from "@harnessme/core";
-import { createGraphScene, GRAPH_HELP } from "./graph-scene.js";
+import { findGraphPath, readFacts, type GraphPath } from "@harnessme/core";
+import { createGraphPathScene, createGraphScene, GRAPH_HELP } from "./graph-scene.js";
 import { findTerminalForceNeighbor, paintTerminalForceGraph, type TerminalForceOptions } from "./terminal-force-graph.js";
 import { addText, COLORS } from "./theme.js";
 
@@ -46,6 +46,8 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   let searching = false;
   let query = "";
   let citationIndex = 0;
+  let pathStartId: string | undefined;
+  let activePath: GraphPath | undefined;
   const history: string[] = [];
   const forceOptions = (): TerminalForceOptions => ({
     width: Math.max(24, canvas.width > 4 ? canvas.width - 4 : renderer.terminalWidth - 6),
@@ -71,9 +73,11 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     if (!selected) return;
     const narrow = renderer.terminalWidth < 110;
     const mapWidth = Math.max(40, forceView || narrow ? renderer.terminalWidth - 6 : renderer.terminalWidth - 86);
-    mapText.visible = !forceView;
-    forceMap.visible = forceView;
-    if (forceView) {
+    mapText.visible = !forceView || Boolean(activePath);
+    forceMap.visible = forceView && !activePath;
+    if (activePath) {
+      mapText.content = createGraphPathScene(activePath);
+    } else if (forceView) {
       const options = forceOptions();
       forceMap.width = options.width;
       forceMap.height = options.height;
@@ -84,14 +88,14 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     } else {
       mapText.content = createGraphScene(graph, selected, radius, reverse, mapWidth);
     }
-    canvas.title = forceView ? " Interactive topology " : " Stable focus map ";
+    canvas.title = activePath ? " Relationship path " : forceView ? " Interactive topology " : " Stable focus map ";
     const citations = selected.citations.length
       ? selected.citations.map((citation, index) => `${index === citationIndex % selected.citations.length ? "▶" : " "} ${citation.path}:${citation.line}`).join("\n")
       : "No direct citation";
     detailText.content = `${selected.label}\n${selected.id}\n\n${selected.summary ?? selected.path ?? selected.scope ?? ""}\n\nProvenance\n${selected.provenance}\n\nEvidence\n${citations}\n\nGuide\n${selected.guide ?? "—"}`;
     renderer.requestRender();
   };
-  select.on(SelectRenderableEvents.SELECTION_CHANGED, render);
+  select.on(SelectRenderableEvents.SELECTION_CHANGED, () => { activePath = undefined; render(); });
   renderer.on(CliRenderEvents.RESIZE, () => { layout(); render(); });
   render(); select.focus();
   const footer = new BoxRenderable(renderer, { height: 1, paddingX: 2 }); rootBox.add(footer);
@@ -110,6 +114,23 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     } else if (key.name === "escape" || key.name === "q" || (key.ctrl && key.name === "c")) resolve("back");
     else if (key.name === "m") resolve("manage");
     else if (key.name === "e") { citationIndex += 1; render(); }
+    else if (key.name === "p" || key.sequence === "P") {
+      key.preventDefault();
+      const selectedId = select.getSelectedOption()?.value;
+      if (typeof selectedId !== "string") return;
+      if (!pathStartId) {
+        pathStartId = selectedId;
+        activePath = undefined;
+        const start = graph.nodes.find((node) => node.id === selectedId);
+        help.content = `Path start: ${start?.label ?? selectedId}  ·  Select destination and press P  ·  Esc/q back`;
+      } else {
+        activePath = findGraphPath(graph, pathStartId, selectedId);
+        const start = graph.nodes.find((node) => node.id === pathStartId);
+        pathStartId = undefined;
+        help.content = activePath ? `${start?.label ?? "Start"} → ${activePath.nodes.at(-1)?.label ?? "destination"}  ·  ${activePath.steps.length} hop${activePath.steps.length === 1 ? "" : "s"}  ·  P new path` : "No relationship path found  ·  P choose another start";
+        render();
+      }
+    }
     else if (key.name === "backspace") {
       const previous = history.pop();
       const index = visible.findIndex((node) => node.id === previous);

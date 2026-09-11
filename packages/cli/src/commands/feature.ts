@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { defineCommand } from "citty";
-import { FeatureOverridesSchema, harnessDir, posixPath, readFacts, writeYaml } from "@harnessme/core";
+import { FeatureOverridesSchema, findGraphPath, harnessDir, posixPath, readFacts, resolveGraphNode, writeYaml } from "@harnessme/core";
 import { syncHarness } from "@harnessme/renderers";
 import { info } from "../output.js";
 import { projectRoot } from "../project.js";
@@ -120,6 +120,31 @@ export const listFeatures = defineCommand({
   },
 });
 
+export const path = defineCommand({
+  meta: { name: "path", description: "Explain the shortest relationship path between two graph nodes" },
+  args: {
+    from: { type: "positional", required: true, description: "Source node ID, repository path, or unique label" },
+    to: { type: "positional", required: true, description: "Destination node ID, repository path, or unique label" },
+    root: { type: "string", description: "Repository root", valueHint: "path" },
+  },
+  async run({ args }) {
+    const facts = await readFacts(projectRoot(args.root));
+    const graph = facts.knowledgeGraph;
+    if (!graph) throw new Error("No knowledge graph exists. Run `harnessme refresh` or `harnessme sync` first.");
+    const from = resolveGraphNode(graph, String(args.from));
+    const to = resolveGraphNode(graph, String(args.to));
+    const result = findGraphPath(graph, from.id, to.id);
+    if (!result) throw new Error(`No relationship path connects ${from.id} to ${to.id}.`);
+    info(`${from.label} (${from.id})`);
+    for (const step of result.steps) {
+      const arrow = step.direction === "forward" ? `--${step.edge.kind}-->` : `<--${step.edge.kind}--`;
+      const evidence = step.edge.citations.map((citation) => `${citation.path}:${citation.line}`).join(", ");
+      info(`  ${arrow} ${step.to.label} (${step.to.id})${evidence ? ` · evidence ${evidence}` : ""}`);
+    }
+    info(`${result.steps.length} hop${result.steps.length === 1 ? "" : "s"}.`);
+  },
+});
+
 async function changeLink(root: string, from: string, to: string, kind: "depends-on" | "related-to", removeLink: boolean): Promise<void> {
   await update(root, (overrides) => {
     const id = `${kind}:${from}->${to}`;
@@ -142,4 +167,4 @@ const linkArgs = {
 export const link = defineCommand({ meta: { name: "link", description: "Link two features" }, args: linkArgs, async run({ args }) { const kind = args.kind as "depends-on" | "related-to"; if (!["depends-on", "related-to"].includes(kind)) throw new Error("Unsupported feature relationship kind."); await changeLink(projectRoot(args.root), String(args.from), String(args.to), kind, false); info(`Linked ${args.from} ${kind} ${args.to}.`); } });
 export const unlink = defineCommand({ meta: { name: "unlink", description: "Remove or exclude a feature link" }, args: linkArgs, async run({ args }) { const kind = args.kind as "depends-on" | "related-to"; if (!["depends-on", "related-to"].includes(kind)) throw new Error("Unsupported feature relationship kind."); await changeLink(projectRoot(args.root), String(args.from), String(args.to), kind, true); info(`Unlinked ${args.from} ${kind} ${args.to}.`); } });
 
-export default defineCommand({ meta: { name: "feature", description: "Manage feature-map overrides" }, subCommands: { list: listFeatures, add, edit, remove, link, unlink } });
+export default defineCommand({ meta: { name: "feature", description: "Manage and query the feature map" }, subCommands: { list: listFeatures, path, add, edit, remove, link, unlink } });

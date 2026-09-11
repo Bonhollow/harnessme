@@ -545,6 +545,10 @@ const value = schema.includes("harnessme_facts")
     await exec(process.execPath, [cli, "feature", "add", "authentication", "--title", "Authentication", "--summary", "Authenticates requests", "--scopes", "src/auth.ts", "--root", root]);
     await exec(process.execPath, [cli, "feature", "add", "sessions", "--title", "Sessions", "--summary", "Maintains sessions", "--scopes", "src/session.ts", "--root", root]);
     await exec(process.execPath, [cli, "feature", "link", "authentication", "sessions", "--kind", "depends-on", "--root", root]);
+    const path = await exec(process.execPath, [cli, "feature", "path", "src/auth.ts", "sessions", "--root", root]);
+    expect(path.stdout).toContain("Authentication (feature:authentication)");
+    expect(path.stdout).toContain("--depends-on--> Sessions (feature:sessions)");
+    expect(path.stdout).toContain("2 hops.");
     const graph = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string; kind: string }> };
     expect(graph.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "feature:authentication" }), expect.objectContaining({ id: "feature:sessions" })]));
     expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "feature:sessions", kind: "depends-on" }));

@@ -43,7 +43,7 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
 4. **Quality intelligence, history, and remediation** — compare evidence, navigation, operations, documentation, and governance; inspect score trends across initialization, refreshes, and fixes; then select any failed check to see its recoverable points, projected score, recommended workflow, and verified result.
 5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
-6. **Knowledge Graph** — stay inside the terminal and press `G` to switch between the structured relationship view and a lightweight force-directed map.
+6. **Knowledge Graph** — stay inside the terminal, press `G` to switch between structured and force-directed views, or press `P` on two nodes to explain their relationship path.
 7. **Generation safety** — preview generated-document diffs in an isolated workspace and restore one of the latest 20 local snapshots without rolling back source code or maintainer facts.
 
 ### CLI commands
@@ -177,6 +177,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme providers list` | List selectable inference providers. | — |
 | `harnessme targets list` | List generated integration targets. | — |
 | `harnessme feature list` | List features and concerns in the knowledge graph. | — |
+| `harnessme feature path <from> <to>` | Explain the shortest relationship path between node IDs, repository paths, or unique labels. | — |
 | `harnessme feature add <slug>` | Add a maintainer-owned feature definition. | `--title`, `--summary`, and comma-separated `--scopes` are required; `--kind feature\|concern` is optional. |
 | `harnessme feature edit <slug>` | Override generated feature metadata. | Optional `--title`, `--summary`, and `--scopes`. |
 | `harnessme feature remove <slug>` | Remove a manual feature or exclude a generated feature. | — |
@@ -197,6 +198,7 @@ harnessme validate             # verify pending notes from AGENTS.md
 harnessme sync                 # regenerate provider files
 harnessme check --ci           # fail when facts have drifted
 harnessme feature add authentication --title "Authentication" --summary "Request identity and session enforcement" --scopes "src/auth/**,tests/auth/**"
+harnessme feature path src/auth.ts sessions
 ```
 
 Add a project policy that cannot be inferred from source code:

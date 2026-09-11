@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OptimizedBuffer } from "@opentui/core";
-import { createGraphScene, GRAPH_HELP } from "../packages/cli/src/dashboard/graph-scene.js";
+import { createGraphPathScene, createGraphScene, GRAPH_HELP } from "../packages/cli/src/dashboard/graph-scene.js";
+import { findGraphPath } from "../packages/core/src/graph-query.js";
 import { createTerminalForceScene, findTerminalForceNeighbor, paintTerminalForceGraph } from "../packages/cli/src/dashboard/terminal-force-graph.js";
 import type { KnowledgeGraph } from "../packages/core/src/schema.js";
 
@@ -22,6 +23,14 @@ describe("graph scene", () => {
 
   it("advertises the force-view switch from the structured explorer", () => {
     expect(GRAPH_HELP).toContain("G force view");
+    expect(GRAPH_HELP).toContain("P path");
+  });
+
+  it("explains path direction and relationship provenance", () => {
+    const path = findGraphPath(graph, graph.nodes[1]!.id, graph.nodes[0]!.id)!;
+    const scene = createGraphPathScene(path);
+    expect(scene).toContain("←── implements ── Authentication");
+    expect(scene).toContain("maintainer");
   });
 
   it("renders a deterministic force-directed graph inside terminal bounds", () => {

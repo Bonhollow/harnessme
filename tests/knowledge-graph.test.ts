@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKnowledgeArtifacts, defaultFeatureOverrides, graphNeighborhood, validateKnowledgeGraph, type FeaturePack, type RepositoryStructure } from "../packages/core/src/index.js";
+import { createKnowledgeArtifacts, defaultFeatureOverrides, findGraphPath, graphNeighborhood, resolveGraphNode, validateKnowledgeGraph, type FeaturePack, type RepositoryStructure } from "../packages/core/src/index.js";
 
 const generatedAt = "2026-09-10T10:00:00.000Z";
 const structure: RepositoryStructure = {
@@ -115,6 +115,23 @@ describe("knowledge graph", () => {
     const reversed = graphNeighborhood(graph, { focusId: "feature:authentication", radius: 1, reverse: true });
     expect(reversed.edges).toContainEqual(expect.objectContaining({ from: "file:packages/api/auth.ts", to: "feature:authentication" }));
     expect(normal.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "file:packages/api/auth.ts" }));
+  });
+
+  it("finds the shortest path and preserves relationship direction", () => {
+    const graph = createKnowledgeArtifacts({ structure, features, criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } } }).graph;
+    const from = resolveGraphNode(graph, "packages/api/auth.test.ts");
+    const to = resolveGraphNode(graph, "Authentication");
+    const path = findGraphPath(graph, from.id, to.id);
+    expect(path?.nodes.map((node) => node.id)).toEqual(["test:packages/api/auth.test.ts", "feature:authentication"]);
+    expect(path?.steps).toEqual([expect.objectContaining({ direction: "reverse", edge: expect.objectContaining({ kind: "verified-by" }) })]);
+  });
+
+  it("returns no path across disconnected graph regions and rejects ambiguous references", () => {
+    const graph = createKnowledgeArtifacts({ structure, features, criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } } }).graph;
+    const isolated = { id: "file:isolated.ts", kind: "file" as const, label: "auth.ts", path: "isolated.ts", provenance: "deterministic" as const, citations: [] };
+    const expanded = { ...graph, nodes: [...graph.nodes, isolated] };
+    expect(findGraphPath(expanded, "feature:authentication", isolated.id)).toBeUndefined();
+    expect(() => resolveGraphNode(expanded, "auth.ts")).toThrow("Ambiguous graph node");
   });
 
   it("allows an excluded feature to remove generated relationships targeting it", () => {

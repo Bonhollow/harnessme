@@ -1,6 +1,6 @@
-import { graphNeighborhood, type KnowledgeEdge, type KnowledgeGraph, type KnowledgeNode } from "../../../core/src/index.js";
+import { graphNeighborhood, type GraphPath, type KnowledgeEdge, type KnowledgeGraph, type KnowledgeNode } from "../../../core/src/index.js";
 
-export const GRAPH_HELP = "↑/↓ node  ←/→ follow  G force view  Backspace history  e evidence  m manage  +/- radius  / search  f filter  i reverse  Esc/q back";
+export const GRAPH_HELP = "↑/↓ node  ←/→ follow  P path  G force view  Backspace history  e evidence  m manage  +/- radius  / search  f filter  i reverse  Esc/q back";
 
 function fit(value: string, width: number): string {
   return value.length > width ? `${value.slice(0, Math.max(0, width - 1))}…` : value.padEnd(width);
@@ -40,5 +40,17 @@ export function createGraphScene(graph: KnowledgeGraph, selected: KnowledgeNode,
   }
   if (distant.length) lines.push("", "RADIUS NEIGHBORS", ...distant.slice(0, 12).map((value) => `  · ${value}`));
   lines.push("", `${neighborhood.nodes.length} nodes · ${neighborhood.edges.length} edges · radius ${radius}`);
+  return lines.join("\n");
+}
+
+/** Render a relationship path with the stored direction and supporting evidence intact. */
+export function createGraphPathScene(path: GraphPath): string {
+  const lines = [`${path.steps.length} hop${path.steps.length === 1 ? "" : "s"}`, "", `◆ ${path.nodes[0]!.label} (${path.nodes[0]!.kind})`];
+  for (const step of path.steps) {
+    const arrow = step.direction === "forward" ? `── ${step.edge.kind} ──→` : `←── ${step.edge.kind} ──`;
+    const evidence = step.edge.citations.map((citation) => `${citation.path}:${citation.line}`).join(", ");
+    lines.push(`  ${arrow} ${step.to.label} (${step.to.kind})`);
+    lines.push(`     ${step.edge.provenance}${evidence ? ` · evidence ${evidence}` : ""}`);
+  }
   return lines.join("\n");
 }

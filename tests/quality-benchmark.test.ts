@@ -60,10 +60,12 @@ function comprehensiveSnapshot(): FactsSnapshot {
       { id: "feature:core", kind: "feature", label: "Core", guide: ".harnessme/features/core.md", provenance: "ai-reviewed", citations: [{ path: "src/core.ts", line: 1 }] },
       { id: "file:src/core.ts", kind: "file", label: "core.ts", path: "src/core.ts", provenance: "deterministic", citations: [{ path: "src/core.ts", line: 1 }] },
       { id: "test:tests/core.test.ts", kind: "test", label: "core.test.ts", path: "tests/core.test.ts", provenance: "deterministic", citations: [{ path: "tests/core.test.ts", line: 1 }] },
+      { id: "document:.harnessme/features/core.md", kind: "document", label: "Core guide", path: ".harnessme/features/core.md", provenance: "deterministic", citations: [] },
     ],
     edges: [
       { id: "implements:feature:core->file:src/core.ts", from: "feature:core", to: "file:src/core.ts", kind: "implements", provenance: "ai-reviewed", citations: [{ path: "src/core.ts", line: 1 }] },
       { id: "verified-by:feature:core->test:tests/core.test.ts", from: "feature:core", to: "test:tests/core.test.ts", kind: "verified-by", provenance: "deterministic", citations: [{ path: "tests/core.test.ts", line: 1 }] },
+      { id: "documented-by:feature:core->document:.harnessme/features/core.md", from: "feature:core", to: "document:.harnessme/features/core.md", kind: "documented-by", provenance: "deterministic", citations: [] },
       { id: "imports:test:tests/core.test.ts->file:src/core.ts", from: "test:tests/core.test.ts", to: "file:src/core.ts", kind: "imports", provenance: "deterministic", citations: [{ path: "tests/core.test.ts", line: 1 }] },
       { id: "imports:file:src/core.ts->test:tests/core.test.ts", from: "file:src/core.ts", to: "test:tests/core.test.ts", kind: "imports", provenance: "deterministic", citations: [{ path: "src/core.ts", line: 1 }] },
     ],
@@ -96,6 +98,7 @@ describe("harness quality benchmark", () => {
     expect(plans.every((plan) => plan.projectedScore >= quality.score && plan.recoverablePoints > 0)).toBe(true);
     expect(plans).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "semantic-coverage", workflow: "features" }),
+      expect.objectContaining({ id: "context-delivery", workflow: "features" }),
       expect.objectContaining({ id: "critical-review", workflow: "gates" }),
       expect.objectContaining({ id: "dependency-density", workflow: "refresh-deterministic" }),
       expect.objectContaining({ id: "operating-contract", workflow: "refresh-ai" }),
@@ -107,7 +110,7 @@ describe("harness quality benchmark", () => {
     expect(quality.score).toBeGreaterThanOrEqual(95);
     expect(quality.grade).toBe("excellent");
     expect(quality.dimensions).toHaveLength(5);
-    expect(quality.metrics).toHaveLength(5);
+    expect(quality.metrics).toHaveLength(6);
     expect(quality.findings).toHaveLength(0);
   });
 
@@ -208,7 +211,7 @@ describe("harness quality benchmark", () => {
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("## Anti-patterns");
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("`src/coreval/api/services/token_provider.py`");
     expect(nestedAgentDocuments(facts)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Local ownership") }),
+      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Graph-routed context") }),
       expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Change workflow") }),
     ]));
     expect(nestedAgentDocuments(facts, [{

@@ -549,6 +549,14 @@ const value = schema.includes("harnessme_facts")
     expect(path.stdout).toContain("Authentication (feature:authentication)");
     expect(path.stdout).toContain("--depends-on--> Sessions (feature:sessions)");
     expect(path.stdout).toContain("2 hops.");
+    const context = await exec(process.execPath, [cli, "context", "src/auth.ts", "--root", root]);
+    expect(context.stdout).toContain("# Change context");
+    expect(context.stdout).toContain("Authentication (feature)");
+    expect(context.stdout).toContain(".harnessme/features/authentication.md");
+    expect(context.stdout).toContain("tests/auth.test.ts");
+    const scopedInstructions = await readFile(join(root, "src", "AGENTS.md"), "utf8");
+    expect(scopedInstructions).toContain("## Graph-routed context");
+    expect(scopedInstructions).toContain("Authentication (feature)");
     const graph = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string; kind: string }> };
     expect(graph.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "feature:authentication" }), expect.objectContaining({ id: "feature:sessions" })]));
     expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "feature:sessions", kind: "depends-on" }));

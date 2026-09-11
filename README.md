@@ -58,6 +58,7 @@ harnessme sync --preview   # preview generated-document changes without writing
 harnessme generation list  # inspect local generated-document snapshots
 harnessme check --ci       # fail CI when repository facts have drifted
 harnessme feature list     # inspect semantic features in the committed graph
+harnessme context src/api/auth.ts  # assemble bounded pre-edit context for one file
 ```
 
 The complete command and critical-change workflow reference is available further down this README.
@@ -65,10 +66,10 @@ The complete command and critical-change workflow reference is available further
 ## What you get
 
 - A concise root `AGENTS.md` that directs agents before they edit.
-- Nested module guides with responsibilities, extension seams, invariants, coupled-change impact, and exact validation.
+- Nested module guides that automatically combine scoped Markdown guidance with graph-derived owners, dependencies, tests, and exact validation.
 - `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
 - Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
-- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, dependency density, test linkage, guide depth, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
+- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, context-delivery coverage, dependency density, test linkage, guide depth, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
 - A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and terminal explorer with structured and force-directed views.
 
 ## Requirements
@@ -178,6 +179,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme targets list` | List generated integration targets. | — |
 | `harnessme feature list` | List features and concerns in the knowledge graph. | — |
 | `harnessme feature path <from> <to>` | Explain the shortest relationship path between node IDs, repository paths, or unique labels. | — |
+| `harnessme context <path>` | Combine the path's owning features, guides, dependencies, consumers, tests, gates, and validation. | `--changed` resolves all current Git changes; `--json` emits structured output. |
 | `harnessme feature add <slug>` | Add a maintainer-owned feature definition. | `--title`, `--summary`, and comma-separated `--scopes` are required; `--kind feature\|concern` is optional. |
 | `harnessme feature edit <slug>` | Override generated feature metadata. | Optional `--title`, `--summary`, and `--scopes`. |
 | `harnessme feature remove <slug>` | Remove a manual feature or exclude a generated feature. | — |
@@ -199,6 +201,7 @@ harnessme sync                 # regenerate provider files
 harnessme check --ci           # fail when facts have drifted
 harnessme feature add authentication --title "Authentication" --summary "Request identity and session enforcement" --scopes "src/auth/**,tests/auth/**"
 harnessme feature path src/auth.ts sessions
+harnessme context src/auth.ts
 ```
 
 Add a project policy that cannot be inferred from source code:

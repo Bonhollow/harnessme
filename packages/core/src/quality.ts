@@ -1,5 +1,6 @@
 import type { FactsSnapshot } from "./facts-store.js";
 import type { DocumentationConflict, HarnessQuality } from "./schema.js";
+import { resolveChangeContext } from "./change-context.js";
 
 type DimensionId = HarnessQuality["dimensions"][number]["id"];
 interface CheckInput { id: string; dimension: DimensionId; points: number; ratio: number; message: string; action: string }
@@ -69,15 +70,22 @@ export function assessHarnessQuality(facts: FactsSnapshot, conflicts: Documentat
   const graphIntegrity = facts.knowledgeGraph?.nodes.length ? (graphErrors ? 0 : 1) : 0;
   const graphConsistency = graphIntegrity * (graphWarnings ? Math.max(0.4, 1 - graphWarnings * 0.15) : 1);
   const generationRatio = facts.generation?.status === "ai-reviewed" ? 1 : facts.generation?.status === "deterministic-fallback" ? 0 : 0.6;
+  const context = facts.knowledgeGraph && fileNodes.length
+    ? resolveChangeContext(facts, fileNodes.flatMap((node) => node.path ? [node.path] : []))
+    : undefined;
+  const contextReady = context?.targets.filter((target) =>
+    target.ownerIds.some((id) => id.startsWith("feature:") || id.startsWith("concern:"))
+    && target.guidePaths.length > 0).length ?? 0;
 
   const definitions: CheckInput[] = [
     { id: "claim-grounding", dimension: "evidence", points: 8, ratio: ratio(groundedFacts, Math.max(1, facts.conventions.facts.length)), message: `${groundedFacts}/${facts.conventions.facts.length} operating claims have valid evidence references.`, action: "Attach valid evidence IDs to every operating claim." },
     { id: "evidence-breadth", dimension: "evidence", points: 6, ratio: ratio(evidencePaths.size, evidenceTarget), message: `${evidencePaths.size}/${evidenceTarget} target repository paths contribute direct evidence.`, action: "Capture evidence across additional owning modules and critical paths." },
     { id: "semantic-evidence", dimension: "evidence", points: 6, ratio: semanticNodes.length ? Math.min(ratio(semanticNodes.filter((node) => node.citations.length).length, semanticNodes.length), relationshipEvidenceRatio) : 0, message: `${semanticNodes.filter((node) => node.citations.length).length}/${semanticNodes.length} semantic nodes and ${citedRelationships.length}/${semanticRelationships.length} relationships are evidence-backed.`, action: "Add source citations to feature nodes and relationships." },
-    { id: "graph-integrity", dimension: "navigation", points: 5, ratio: graphIntegrity, message: graphIntegrity ? "The graph is present and has no validation errors." : "The graph is absent or contains validation errors.", action: "Refresh and repair the knowledge graph." },
-    { id: "semantic-coverage", dimension: "navigation", points: 8, ratio: ratio(coveredFiles.size, Math.max(1, fileNodes.length)), message: `${coveredFiles.size}/${fileNodes.length} graph files are assigned to a feature or concern.`, action: "Add or expand feature scopes for orphaned implementation and test files." },
-    { id: "dependency-density", dimension: "navigation", points: 7, ratio: ratio(importEdges, dependencyTarget), message: `${importEdges} local imports mapped; ${dependencyTarget} is the repository-size target.`, action: "Configure source roots and import aliases, then refresh." },
-    { id: "test-linkage", dimension: "navigation", points: 5, ratio: ratio(linkedFeatures.size, Math.max(1, semanticNodes.length)), message: `${linkedFeatures.size}/${semanticNodes.length} semantic nodes link to focused tests.`, action: "Connect feature scopes to focused tests or resolvable test imports." },
+    { id: "graph-integrity", dimension: "navigation", points: 4, ratio: graphIntegrity, message: graphIntegrity ? "The graph is present and has no validation errors." : "The graph is absent or contains validation errors.", action: "Refresh and repair the knowledge graph." },
+    { id: "semantic-coverage", dimension: "navigation", points: 6, ratio: ratio(coveredFiles.size, Math.max(1, fileNodes.length)), message: `${coveredFiles.size}/${fileNodes.length} graph files are assigned to a feature or concern.`, action: "Add or expand feature scopes for orphaned implementation and test files." },
+    { id: "context-delivery", dimension: "navigation", points: 6, ratio: ratio(contextReady, Math.max(1, fileNodes.length)), message: `${contextReady}/${fileNodes.length} graph files resolve to both a semantic owner and an applicable guide.`, action: "Map uncovered files to features with graph-linked guides, then sync scoped instructions." },
+    { id: "dependency-density", dimension: "navigation", points: 5, ratio: ratio(importEdges, dependencyTarget), message: `${importEdges} local imports mapped; ${dependencyTarget} is the repository-size target.`, action: "Configure source roots and import aliases, then refresh." },
+    { id: "test-linkage", dimension: "navigation", points: 4, ratio: ratio(linkedFeatures.size, Math.max(1, semanticNodes.length)), message: `${linkedFeatures.size}/${semanticNodes.length} semantic nodes link to focused tests.`, action: "Connect feature scopes to focused tests or resolvable test imports." },
     { id: "purpose", dimension: "operations", points: 3, ratio: facts.stack.projectSummary ? 1 : 0, message: facts.stack.projectSummary ? "Repository purpose is grounded." : "Repository purpose is missing.", action: "Provide a grounded project purpose." },
     { id: "validation-depth", dimension: "operations", points: 6, ratio: Math.min(ratio(validationCommands.length, 2), ratio(validationKinds.size, 2)), message: `${validationCommands.length} commands cover ${validationKinds.size} validation categories.`, action: "Verify at least two complementary test, lint, or build commands." },
     { id: "operating-contract", dimension: "operations", points: 5, ratio: ["Before editing", "Operating rules"].filter((heading) => has(markdown, heading)).length / 2, message: "Pre-edit and operating instructions are evaluated independently.", action: "Add concrete pre-edit routing and imperative operating rules." },
@@ -104,6 +112,7 @@ export function assessHarnessQuality(facts: FactsSnapshot, conflicts: Documentat
   const metrics = [
     { id: "evidence-paths", label: "Evidence breadth", value: evidencePaths.size, target: evidenceTarget, percentage: Math.round(ratio(evidencePaths.size, evidenceTarget) * 100), detail: "repository paths contributing evidence" },
     { id: "semantic-coverage", label: "Feature coverage", value: coveredFiles.size, target: Math.max(1, fileNodes.length), percentage: Math.round(ratio(coveredFiles.size, Math.max(1, fileNodes.length)) * 100), detail: "files assigned to semantic nodes" },
+    { id: "context-delivery", label: "Context delivery", value: contextReady, target: Math.max(1, fileNodes.length), percentage: Math.round(ratio(contextReady, Math.max(1, fileNodes.length)) * 100), detail: "files resolving to an owner and guide" },
     { id: "dependency-density", label: "Dependency map", value: importEdges, target: dependencyTarget, percentage: Math.round(ratio(importEdges, dependencyTarget) * 100), detail: "resolved local import edges" },
     { id: "test-linkage", label: "Test linkage", value: linkedFeatures.size, target: Math.max(1, semanticNodes.length), percentage: Math.round(ratio(linkedFeatures.size, Math.max(1, semanticNodes.length)) * 100), detail: "features linked to focused tests" },
     { id: "reference-depth", label: "Guide depth", value: deepReferences, target: Math.max(1, references.length), percentage: Math.round(ratio(deepReferences, Math.max(1, references.length)) * 100), detail: "guides satisfying the deep contract" },

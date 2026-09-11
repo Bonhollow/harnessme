@@ -21,6 +21,7 @@ const CHECK_TITLES: Record<string, string> = {
   "semantic-evidence": "Ground feature relationships",
   "graph-integrity": "Repair graph integrity",
   "semantic-coverage": "Map uncovered files",
+  "context-delivery": "Connect files to agent context",
   "dependency-density": "Complete dependency mapping",
   "test-linkage": "Connect features to tests",
   purpose: "Define repository purpose",
@@ -39,7 +40,7 @@ const CHECK_TITLES: Record<string, string> = {
 
 function workflowFor(checkId: string): QualityRemediationWorkflow {
   if (checkId === "critical-review") return "gates";
-  if (checkId === "semantic-coverage" || checkId === "test-linkage") return "features";
+  if (checkId === "semantic-coverage" || checkId === "context-delivery" || checkId === "test-linkage") return "features";
   if (checkId === "graph-integrity" || checkId === "dependency-density" || checkId === "freshness" || checkId === "graph-consistency") return "refresh-deterministic";
   return "refresh-ai";
 }

@@ -61,7 +61,6 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
   await atomicWrite(agentsPath, content);
   const files = ["AGENTS.md", ".ruler/AGENTS.md", ".ruler/ruler.toml"];
   const references = referenceDocuments(facts);
-  files.push(...await syncGuidance(root, facts, references));
 
   const structure = facts.structure ?? {
     schemaVersion: 1 as const,
@@ -78,6 +77,12 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
     overrides: facts.featureOverrides ?? defaultFeatureOverrides(),
     referenceProvenance: facts.generation?.status === "ai-reviewed" ? "ai-reviewed" : "deterministic",
   });
+  const contextFacts = {
+    ...facts,
+    knowledgeGraph: knowledge.graph,
+    referencePack: { schemaVersion: 1 as const, generatedAt: facts.referencePack?.generatedAt ?? structure.generatedAt, documents: references },
+  };
+  files.push(...await syncGuidance(root, contextFacts, references));
   await writeJson(join(root, ".harnessme", "knowledge-graph.json"), knowledge.graph);
   files.push(".harnessme/knowledge-graph.json");
   const retiredGraphPath = join(root, ".harnessme", "graph.html");

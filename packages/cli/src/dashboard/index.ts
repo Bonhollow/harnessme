@@ -4,10 +4,11 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
-import { planQualityRemediations, recordQualitySnapshot, type QualityRemediation } from "@harnessme/core";
+import { planQualityRemediations, readFacts, recordQualitySnapshot, type QualityRemediation } from "@harnessme/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import syncCommand from "../commands/sync.js";
+import contextCommand from "../commands/context.js";
 import { listGenerations, previewGenerationRollback, previewHarnessSync, rollbackGeneration } from "@harnessme/renderers";
 import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
 import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
@@ -212,6 +213,23 @@ async function chooseGenerationRollback(root: string): Promise<string | undefine
   return confirmed?.value === true ? selected.value : undefined;
 }
 
+async function chooseContextPath(root: string): Promise<string | undefined> {
+  const graph = (await readFacts(root)).knowledgeGraph;
+  const nodes = graph?.nodes.filter((node) => (node.kind === "file" || node.kind === "test") && node.path) ?? [];
+  if (!nodes.length) {
+    await selectOption("No graph files", "Refresh the harness before resolving path-aware context.", [
+      { name: "Return to dashboard", description: "No source or test nodes are available.", value: false },
+    ]);
+    return undefined;
+  }
+  const selected = await selectOption("Resolve file context", "Choose a source or test path to combine its graph and Markdown guidance.", nodes.map((node) => ({
+    name: node.path!,
+    description: node.kind,
+    value: node.path!,
+  })));
+  return typeof selected?.value === "string" ? selected.value : undefined;
+}
+
 async function confirmRemoval(): Promise<boolean> {
   const selected = await selectOption(
     "Delete HarnessME state?",
@@ -272,6 +290,10 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         if (await exploreGraph(root) !== "manage") return undefined;
         const plan = await manageFeatures(root);
         return plan ? featureOperation(root, plan) : undefined;
+      } },
+      { label: "Resolve file context", description: "Combine the owning feature, guides, dependencies, tests, gates, and validation for one path.", prepare: async () => {
+        const path = await chooseContextPath(root);
+        return path ? async (onOutput) => runDashboardCommand(root, contextCommand, { path }, onOutput) : undefined;
       } },
       { label: "Manage features", description: "Add, correct, or remove maintainer-owned feature metadata.", prepare: async () => {
         const plan = await manageFeatures(root);

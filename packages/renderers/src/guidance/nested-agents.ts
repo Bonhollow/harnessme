@@ -1,4 +1,4 @@
-import type { FactsSnapshot, ReferenceDocument } from "@harnessme/core";
+import { renderChangeContext, resolveChangeContext, type FactsSnapshot, type ReferenceDocument } from "../../../core/src/index.js";
 import { concernReferenceDocuments, guidanceDirectory } from "./concerns.js";
 import { referenceScopes, scopeMatchesPath } from "./scopes.js";
 
@@ -66,6 +66,9 @@ export function nestedAgentDocuments(
     }).filter(Boolean).join("\n\n");
     const gates = activeGates.filter((entry) => scopeMatchesPath(`${directory}/**`, entry.glob.replace(/\*.*$/u, ""))
       || entry.glob.startsWith(`${directory}/`));
+    const graphContext = facts.knowledgeGraph && localPaths.length
+      ? renderChangeContext(resolveChangeContext(facts, localPaths), { compact: true, pathPrefix: "../".repeat(directory.split("/").length) })
+      : "## Graph-routed context\n\n- No graph context is available; run `harnessme refresh` after structural changes.\n";
     return {
       directory,
       markdown: `# Scoped agent guidance
@@ -75,6 +78,8 @@ This file adds rules for \`${directory}/\`. Read the repository root \`AGENTS.md
 ## Applicable guides
 
 ${documents.map((document) => `- [${document.title}](${"../".repeat(directory.split("/").length)}.harnessme/references/${document.slug}.md): ${document.description}`).join("\n")}
+
+${graphContext.trim()}
 
 ## Local ownership
 

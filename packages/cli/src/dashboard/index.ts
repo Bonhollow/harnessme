@@ -193,7 +193,7 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
-      { label: "Explore knowledge graph", description: "Browse the structured graph and press G to switch to the lightweight 3D force view.", prepare: async () => {
+      { label: "Explore knowledge graph", description: "Browse the structured graph and press G for its terminal force-directed view.", prepare: async () => {
         if (await exploreGraph(root) !== "manage") return undefined;
         const plan = await manageFeatures(root);
         return plan ? featureOperation(root, plan) : undefined;

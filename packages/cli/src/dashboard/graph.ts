@@ -1,8 +1,8 @@
 import { BoxRenderable, CliRenderEvents, SelectRenderable, SelectRenderableEvents, createCliRenderer, type SelectOption } from "@opentui/core";
 import { readFacts } from "@harnessme/core";
 import { createGraphScene, GRAPH_HELP } from "./graph-scene.js";
+import { createTerminalForceScene } from "./terminal-force-graph.js";
 import { addText, COLORS } from "./theme.js";
-import { openForceGraph } from "../commands/graph.js";
 
 export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   const graph = (await readFacts(root)).knowledgeGraph;
@@ -20,9 +20,12 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   const canvas = new BoxRenderable(renderer, { flexGrow: 1, border: true, borderColor: COLORS.accent, title: " Stable focus map ", padding: 1, flexDirection: "column" });
   const details = new BoxRenderable(renderer, { width: 42, border: true, borderColor: COLORS.border, title: " Evidence and support ", padding: 1 });
   body.add(index); body.add(canvas); body.add(details);
+  let forceView = false;
   const layout = (): void => {
     const narrow = renderer.terminalWidth < 110;
-    body.flexDirection = narrow ? "column" : "row";
+    index.visible = !forceView;
+    details.visible = !forceView;
+    body.flexDirection = !forceView && narrow ? "column" : "row";
     index.width = narrow ? "100%" : 38; index.height = narrow ? 8 : "auto";
     details.width = narrow ? "100%" : 42; details.height = narrow ? 9 : "auto";
   };
@@ -45,7 +48,12 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   const render = (): void => {
     const selected = graph.nodes.find((node) => node.id === select.getSelectedOption()?.value) ?? ordered[0];
     if (!selected) return;
-    mapText.content = createGraphScene(graph, selected, radius, reverse, Math.max(40, renderer.terminalWidth < 110 ? renderer.terminalWidth - 6 : renderer.terminalWidth - 86));
+    const narrow = renderer.terminalWidth < 110;
+    const mapWidth = Math.max(40, forceView || narrow ? renderer.terminalWidth - 6 : renderer.terminalWidth - 86);
+    mapText.content = forceView
+      ? createTerminalForceScene(graph, selected, { width: mapWidth, height: Math.max(10, renderer.terminalHeight - (narrow ? 25 : 8)), radius, reverse })
+      : createGraphScene(graph, selected, radius, reverse, mapWidth);
+    canvas.title = forceView ? " Force-directed map " : " Stable focus map ";
     const citations = selected.citations.length
       ? selected.citations.map((citation, index) => `${index === citationIndex % selected.citations.length ? "▶" : " "} ${citation.path}:${citation.line}`).join("\n")
       : "No direct citation";
@@ -57,7 +65,6 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   render(); select.focus();
   const footer = new BoxRenderable(renderer, { height: 1, paddingX: 2 }); rootBox.add(footer);
   const help = addText(renderer, footer, GRAPH_HELP, { height: 1, fg: COLORS.muted });
-  let openingForceGraph = false;
   const result = await new Promise<"back" | "manage">((resolve) => renderer.keyInput.on("keypress", (key) => {
     if (searching) {
       key.preventDefault();
@@ -82,17 +89,10 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     else if (key.name === "i") { reverse = !reverse; render(); }
     else if (key.name === "g" || key.sequence === "G") {
       key.preventDefault();
-      if (openingForceGraph) return;
-      openingForceGraph = true;
-      help.content = "Opening 3D force view…  Return here for the structured graph";
-      renderer.requestRender();
-      void openForceGraph(root).then(() => {
-        help.content = "3D force view opened  ·  G reopen  ·  structured graph remains active here";
-        renderer.requestRender();
-      }).catch((error: unknown) => {
-        help.content = `Could not open 3D view: ${error instanceof Error ? error.message : String(error)}`;
-        renderer.requestRender();
-      }).finally(() => { openingForceGraph = false; });
+      forceView = !forceView;
+      help.content = forceView ? "Force view  ·  G structured view  ·  +/- radius  ·  Esc/q back" : GRAPH_HELP;
+      layout();
+      render();
     }
     else if (key.name === "/") { key.preventDefault(); searching = true; query = ""; help.content = "Search: _   Enter accept   Esc clear"; renderer.requestRender(); }
     else if (key.name === "f") {

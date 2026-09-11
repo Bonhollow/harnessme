@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createGraphScene, GRAPH_HELP } from "../packages/cli/src/dashboard/graph-scene.js";
+import { createTerminalForceScene } from "../packages/cli/src/dashboard/terminal-force-graph.js";
 import type { KnowledgeGraph } from "../packages/core/src/schema.js";
 
 const graph: KnowledgeGraph = {
@@ -18,7 +19,18 @@ describe("graph scene", () => {
     expect(createGraphScene(graph, graph.nodes[0]!, 1, false, 60)).toContain("◆ Authentication (feature)");
   });
 
-  it("advertises the 3D view switch from the structured explorer", () => {
-    expect(GRAPH_HELP).toContain("G 3D view");
+  it("advertises the force-view switch from the structured explorer", () => {
+    expect(GRAPH_HELP).toContain("G force view");
+  });
+
+  it("renders a deterministic force-directed graph inside terminal bounds", () => {
+    const first = createTerminalForceScene(graph, graph.nodes[0]!, { width: 64, height: 18 });
+    const second = createTerminalForceScene(graph, graph.nodes[0]!, { width: 64, height: 18 });
+    expect(first).toBe(second);
+    expect(first.split("\n").length).toBeLessThanOrEqual(18);
+    expect(first.split("\n").every((line) => line.length <= 64)).toBe(true);
+    expect(first).toContain("◆");
+    expect(first).toContain("Authentication");
+    expect(first).toMatch(/[·─│╱╲]/u);
   });
 });

@@ -27,6 +27,14 @@ interface Action {
   prepare: () => Promise<Operation | undefined>;
 }
 
+type QualityImprovement = "refresh-ai" | "refresh-deterministic" | "features" | "gates";
+
+function recommendedQualityImprovement(dimension: string): QualityImprovement {
+  if (dimension === "governance") return "gates";
+  if (dimension === "navigation") return "features";
+  return "refresh-ai";
+}
+
 async function selectOption(
   title: string,
   description: string,
@@ -137,6 +145,34 @@ async function showQualityReport(root: string): Promise<void> {
   renderer.destroy();
 }
 
+async function chooseQualityImprovement(root: string): Promise<QualityImprovement | undefined> {
+  const report = await loadQualityReport(root);
+  const finding = await selectOption(
+    "Improve quality",
+    `${report.quality.score}/100 · Select the gap to address. Each choice leads to a concrete remediation workflow.`,
+    [
+      ...report.quality.findings.slice(0, 6).map((item, index) => ({
+        name: `${index + 1}. ${item.dimension} · ${item.severity}`,
+        description: `${item.message}  →  ${item.action}`,
+        value: item.dimension,
+      })),
+      { name: "Refresh the whole assessment", description: "Regenerate guidance and reassess all quality dimensions.", value: "refresh" },
+    ],
+  );
+  if (!finding) return undefined;
+  const recommendation = finding.value === "refresh" ? "refresh-ai" : recommendedQualityImprovement(String(finding.value));
+  const selected = await selectOption(
+    "Choose remediation",
+    `Recommended: ${recommendation === "gates" ? "review critical paths" : recommendation === "features" ? "map features and tests" : "regenerate the harness with AI"}.`,
+    [
+      { name: "Use recommended workflow", description: "Open the workflow most likely to improve this quality gap.", value: recommendation },
+      { name: "Refresh with AI", description: "Regenerate instructions, guides, and the knowledge graph with the configured provider.", value: "refresh-ai" },
+      { name: "Refresh deterministically", description: "Reassess and regenerate without model inference.", value: "refresh-deterministic" },
+    ],
+  );
+  return selected?.value as QualityImprovement | undefined;
+}
+
 async function confirmRemoval(): Promise<boolean> {
   const selected = await selectOption(
     "Delete HarnessME state?",
@@ -222,6 +258,24 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
       { label: "Quality report", description: "Open an actionable health view with score, gaps, and next steps.", prepare: async () => {
         await showQualityReport(root);
         return undefined;
+      } },
+      { label: "Improve quality", description: "Choose a weak quality area and open its recommended remediation workflow.", prepare: async () => {
+        const improvement = await chooseQualityImprovement(root);
+        if (!improvement) return undefined;
+        if (improvement === "gates") {
+          const plan = await manageGates(root);
+          if (!plan || (!plan.activate.length && !plan.remove.length && !plan.add)) return undefined;
+          return async (onOutput) => {
+            for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
+            for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+            if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
+          };
+        }
+        if (improvement === "features") {
+          const plan = await manageFeatures(root);
+          return plan ? featureOperation(root, plan) : undefined;
+        }
+        return async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: improvement === "refresh-deterministic" }, onOutput);
       } },
       { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
         const plan = await manageGates(root);

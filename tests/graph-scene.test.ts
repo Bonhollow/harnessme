@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { OptimizedBuffer } from "@opentui/core";
 import { createGraphScene, GRAPH_HELP } from "../packages/cli/src/dashboard/graph-scene.js";
-import { createTerminalForceScene } from "../packages/cli/src/dashboard/terminal-force-graph.js";
+import { createTerminalForceScene, findTerminalForceNeighbor, paintTerminalForceGraph } from "../packages/cli/src/dashboard/terminal-force-graph.js";
 import type { KnowledgeGraph } from "../packages/core/src/schema.js";
 
 const graph: KnowledgeGraph = {
@@ -32,5 +33,43 @@ describe("graph scene", () => {
     expect(first).toContain("◆");
     expect(first).toContain("Authentication");
     expect(first).toMatch(/[·─│╱╲]/u);
+  });
+
+  it("moves force-view focus toward the arrow-key direction on screen", () => {
+    const directionalGraph: KnowledgeGraph = {
+      ...graph,
+      nodes: [
+        graph.nodes[0]!,
+        graph.nodes[1]!,
+        { id: "file:src/session.ts", kind: "file", label: "session.ts", path: "src/session.ts", provenance: "deterministic", citations: [] },
+        { id: "test:tests/auth.test.ts", kind: "test", label: "auth.test.ts", path: "tests/auth.test.ts", provenance: "deterministic", citations: [] },
+      ],
+      edges: [
+        ...graph.edges,
+        { id: "implements:feature:auth->file:src/session.ts", from: "feature:auth", to: "file:src/session.ts", kind: "implements", provenance: "maintainer", citations: [] },
+        { id: "verified-by:feature:auth->test:tests/auth.test.ts", from: "feature:auth", to: "test:tests/auth.test.ts", kind: "verified-by", provenance: "maintainer", citations: [] },
+      ],
+    };
+    const selected = directionalGraph.nodes[0]!;
+    const right = findTerminalForceNeighbor(directionalGraph, selected, { width: 64, height: 18 }, "right");
+    const left = findTerminalForceNeighbor(directionalGraph, selected, { width: 64, height: 18 }, "left");
+    expect(right?.id).not.toBe(selected.id);
+    expect(left?.id).not.toBe(selected.id);
+    expect(right?.id).not.toBe(left?.id);
+  });
+
+  it("paints a color-aware interactive topology scene", () => {
+    const text: string[] = [];
+    const cells: string[] = [];
+    const buffer = {
+      clear: () => {},
+      drawText: (value: string) => text.push(value),
+      setCell: (_x: number, _y: number, value: string) => cells.push(value),
+    } as unknown as OptimizedBuffer;
+    paintTerminalForceGraph(buffer, graph, graph.nodes[0]!, { width: 64, height: 18 });
+    expect(text.join(" ")).toContain("● feature");
+    expect(text.join(" ")).toContain("Authentication · feature");
+    expect(text.join(" ")).toContain("relationships");
+    expect(cells).toContain("◆");
   });
 });

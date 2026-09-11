@@ -56,27 +56,37 @@ export function buildDashboard(renderer: CliRenderer, state: DashboardState, opt
 
   const body = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row", gap: 1, padding: 1 });
   root.add(body);
-  const sidebar = new BoxRenderable(renderer, { width: 40, flexDirection: "column", gap: 1, border: true, borderColor: COLORS.border, title: " Harness control " });
+  const sidebar = new BoxRenderable(renderer, { width: 40, flexDirection: "column", border: true, borderColor: COLORS.border, title: " Harness control " });
   body.add(sidebar);
   const health = [
     `${state.initialized ? "●" : "○"} ${state.initialized ? "Harness installed" : "Harness not initialized"}`,
-    `Quality   ${state.quality}`,
-    `Gates     ${state.activeGates} active · ${state.proposedGates} proposed`,
-    `Guides    ${state.references} scoped guide${state.references === 1 ? "" : "s"}`,
-    `Graph     ${state.graphNodes} nodes · ${state.graphEdges} edges`,
+    `Gates ${state.activeGates}/${state.proposedGates} active/proposed  ·  ${state.references} guides  ·  ${state.graphNodes} graph nodes`,
   ].join("\n");
   const inference = [
-    `Mode      ${state.mode}`,
-    `Provider  ${state.provider}`,
-    `Model     ${state.model}`,
-    `Thinking  ${state.thinking}`,
+    `${state.mode}  ·  ${state.provider}`,
+    `${state.model}  ·  thinking ${state.thinking}`,
   ].join("\n");
-  const healthCard = new BoxRenderable(renderer, { border: true, borderColor: state.initialized ? COLORS.success : COLORS.border, title: " Health ", paddingX: 1, height: 7 });
+  const healthCard = new BoxRenderable(renderer, { border: true, borderColor: state.initialized ? COLORS.success : COLORS.border, title: " Health ", paddingX: 1, height: 4 });
   sidebar.add(healthCard);
-  addText(renderer, healthCard, health, { height: 5, fg: state.initialized ? COLORS.success : COLORS.muted, truncate: true });
-  const inferenceCard = new BoxRenderable(renderer, { border: true, borderColor: COLORS.border, title: " Inference ", paddingX: 1, height: 6 });
+  addText(renderer, healthCard, health, { height: 2, fg: state.initialized ? COLORS.success : COLORS.muted, truncate: true });
+  if (state.quality) {
+    const score = state.quality.score;
+    const scoreColor = score >= 90 ? COLORS.success : score >= 55 ? COLORS.warning : COLORS.danger;
+    const filled = Math.round((score / 100) * 18);
+    const qualityCard = new BoxRenderable(renderer, { border: true, borderColor: scoreColor, title: ` Quality · ${state.quality.grade} `, paddingX: 1, height: 6, flexDirection: "column" });
+    sidebar.add(qualityCard);
+    addText(renderer, qualityCard, `${score}/100  ·  confidence ${state.quality.confidence}%`, { height: 1, fg: scoreColor });
+    addText(renderer, qualityCard, `${"█".repeat(filled)}${"░".repeat(18 - filled)}`, { height: 1, fg: scoreColor });
+    const weakest = [...state.quality.dimensions].sort((left, right) => left.score - right.score).slice(0, 2);
+    for (const dimension of weakest) {
+      const bars = Math.round((dimension.score / 100) * 8);
+      const color = dimension.score >= 80 ? COLORS.success : dimension.score >= 55 ? COLORS.warning : COLORS.danger;
+      addText(renderer, qualityCard, `${dimension.label.padEnd(13)} ${String(dimension.score).padStart(3)}% ${"▰".repeat(bars)}${"▱".repeat(8 - bars)}`, { height: 1, fg: color, truncate: true });
+    }
+  }
+  const inferenceCard = new BoxRenderable(renderer, { border: true, borderColor: COLORS.border, title: " Inference ", paddingX: 1, height: 4 });
   sidebar.add(inferenceCard);
-  addText(renderer, inferenceCard, inference, { height: 4, fg: COLORS.text, truncate: true });
+  addText(renderer, inferenceCard, inference, { height: 2, fg: COLORS.text, truncate: true });
   addText(renderer, sidebar, " Actions ", { height: 1, fg: COLORS.accent });
   const select = new SelectRenderable(renderer, {
     options,

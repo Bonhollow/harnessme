@@ -1,7 +1,7 @@
-import { BoxRenderable, CliRenderEvents, SelectRenderable, SelectRenderableEvents, createCliRenderer, type SelectOption } from "@opentui/core";
+import { BoxRenderable, CliRenderEvents, FrameBufferRenderable, SelectRenderable, SelectRenderableEvents, createCliRenderer, type SelectOption } from "@opentui/core";
 import { readFacts } from "@harnessme/core";
 import { createGraphScene, GRAPH_HELP } from "./graph-scene.js";
-import { createTerminalForceScene } from "./terminal-force-graph.js";
+import { findTerminalForceNeighbor, paintTerminalForceGraph, type TerminalForceOptions } from "./terminal-force-graph.js";
 import { addText, COLORS } from "./theme.js";
 
 export async function exploreGraph(root: string): Promise<"back" | "manage"> {
@@ -37,6 +37,8 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   const select = new SelectRenderable(renderer, { options, flexGrow: 1, focusedBackgroundColor: COLORS.panel, selectedBackgroundColor: COLORS.selected, selectedTextColor: "#ffffff", textColor: COLORS.text, descriptionColor: COLORS.muted, wrapSelection: true, showDescription: true, showScrollIndicator: true });
   index.add(select);
   const mapText = addText(renderer, canvas, "", { width: "100%", flexGrow: 1, fg: COLORS.accent, wrapMode: "word" });
+  const forceMap = new FrameBufferRenderable(renderer, { width: 1, height: 1, visible: false });
+  canvas.add(forceMap);
   const detailText = addText(renderer, details, "", { width: "100%", flexGrow: 1, wrapMode: "word" });
   let radius = 1;
   let reverse = false;
@@ -45,15 +47,44 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
   let query = "";
   let citationIndex = 0;
   const history: string[] = [];
+  const forceOptions = (): TerminalForceOptions => ({
+    width: Math.max(24, canvas.width > 4 ? canvas.width - 4 : renderer.terminalWidth - 6),
+    height: Math.max(8, canvas.height > 4 ? canvas.height - 4 : renderer.terminalHeight - 8),
+    radius,
+    reverse,
+  });
+  const focusNode = (nodeId: string, previousId?: string): void => {
+    let index = visible.findIndex((node) => node.id === nodeId);
+    if (index < 0) {
+      filter = "all";
+      visible = ordered;
+      select.options = nodeOptions();
+      index = visible.findIndex((node) => node.id === nodeId);
+    }
+    if (index < 0) return;
+    if (previousId) history.push(previousId);
+    citationIndex = 0;
+    select.setSelectedIndex(index);
+  };
   const render = (): void => {
     const selected = graph.nodes.find((node) => node.id === select.getSelectedOption()?.value) ?? ordered[0];
     if (!selected) return;
     const narrow = renderer.terminalWidth < 110;
     const mapWidth = Math.max(40, forceView || narrow ? renderer.terminalWidth - 6 : renderer.terminalWidth - 86);
-    mapText.content = forceView
-      ? createTerminalForceScene(graph, selected, { width: mapWidth, height: Math.max(10, renderer.terminalHeight - (narrow ? 25 : 8)), radius, reverse })
-      : createGraphScene(graph, selected, radius, reverse, mapWidth);
-    canvas.title = forceView ? " Force-directed map " : " Stable focus map ";
+    mapText.visible = !forceView;
+    forceMap.visible = forceView;
+    if (forceView) {
+      const options = forceOptions();
+      forceMap.width = options.width;
+      forceMap.height = options.height;
+      if (forceMap.frameBuffer.width !== options.width || forceMap.frameBuffer.height !== options.height) {
+        forceMap.frameBuffer.resize(options.width, options.height);
+      }
+      paintTerminalForceGraph(forceMap.frameBuffer, graph, selected, options);
+    } else {
+      mapText.content = createGraphScene(graph, selected, radius, reverse, mapWidth);
+    }
+    canvas.title = forceView ? " Interactive topology " : " Stable focus map ";
     const citations = selected.citations.length
       ? selected.citations.map((citation, index) => `${index === citationIndex % selected.citations.length ? "▶" : " "} ${citation.path}:${citation.line}`).join("\n")
       : "No direct citation";
@@ -90,7 +121,7 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
     else if (key.name === "g" || key.sequence === "G") {
       key.preventDefault();
       forceView = !forceView;
-      help.content = forceView ? "Force view  ·  G structured view  ·  +/- radius  ·  Esc/q back" : GRAPH_HELP;
+      help.content = forceView ? "Force view  ·  Arrows nearest node  ·  Tab next node  ·  G structured  ·  +/- radius  ·  Backspace history  ·  Esc/q back" : GRAPH_HELP;
       layout();
       render();
     }
@@ -99,12 +130,24 @@ export async function exploreGraph(root: string): Promise<"back" | "manage"> {
       filter = filter === "all" ? "semantic" : filter === "semantic" ? "structure" : "all";
       visible = ordered.filter((node) => filter === "all" || (filter === "semantic" ? ["feature", "concern"].includes(node.kind) : !["feature", "concern"].includes(node.kind)));
       select.options = nodeOptions(); help.content = `Filter: ${filter}   ↑/↓ node   / search   f cycle   i reverse   Esc/q back`; render();
+    } else if (forceView && key.name === "tab") {
+      key.preventDefault();
+      const selectedId = select.getSelectedOption()?.value;
+      const current = visible.findIndex((node) => node.id === selectedId);
+      const target = visible[(current + 1 + visible.length) % visible.length];
+      if (target) focusNode(target.id, typeof selectedId === "string" ? selectedId : undefined);
+    } else if (forceView && ["up", "down", "left", "right"].includes(key.name)) {
+      key.preventDefault();
+      const selectedId = select.getSelectedOption()?.value;
+      const selected = graph.nodes.find((node) => node.id === selectedId);
+      if (!selected) return;
+      const target = findTerminalForceNeighbor(graph, selected, forceOptions(), key.name as "up" | "down" | "left" | "right");
+      if (target) focusNode(target.id, selected.id);
     } else if (key.name === "left" || key.name === "right") {
       key.preventDefault();
       const selectedId = select.getSelectedOption()?.value;
       const candidates = graph.edges.filter((edge) => key.name === "left" ? edge.to === selectedId : edge.from === selectedId).map((edge) => key.name === "left" ? edge.from : edge.to);
-      const index = visible.findIndex((node) => node.id === candidates[0]);
-      if (index >= 0) { if (typeof selectedId === "string") history.push(selectedId); citationIndex = 0; select.setSelectedIndex(index); }
+      if (candidates[0]) focusNode(candidates[0], typeof selectedId === "string" ? selectedId : undefined);
     }
   }));
   renderer.destroy();

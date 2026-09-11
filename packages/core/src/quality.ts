@@ -110,9 +110,11 @@ export function assessHarnessQuality(facts: FactsSnapshot, conflicts: Documentat
   ];
   const severityOrder = { high: 0, medium: 1, low: 2 } as const;
   const findings = definitions.filter((item) => item.ratio < 0.8).map((item) => ({
+    checkId: item.id,
     severity: (item.ratio < 0.25 && item.points >= 5 ? "high" : item.ratio < 0.6 ? "medium" : "low") as "high" | "medium" | "low",
     dimension: item.dimension, message: item.message, action: item.action,
-  })).sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity]).slice(0, 12);
+    recoverablePoints: Math.round((item.points - (checks.find((candidate) => candidate.id === item.id)?.earned ?? 0)) * 10) / 10,
+  })).sort((left, right) => severityOrder[left.severity] - severityOrder[right.severity]);
   const confidence = Math.round(20 * Number(Boolean(facts.structure)) + 20 * Number(Boolean(facts.knowledgeGraph)) + 20 * ratio(evidencePaths.size, evidenceTarget) + 20 * ratio(validationCommands.length, 2) + 20 * (facts.generation?.status === "ai-reviewed" ? 1 : facts.generation?.status === "deterministic" ? 0.7 : 0.4));
   return { schemaVersion: 1, generatedAt: new Date().toISOString(), score, grade: grade(score), confidence, checks, dimensions, metrics, findings };
 }

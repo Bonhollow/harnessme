@@ -8,6 +8,7 @@ export * from "./git.js";
 export * from "./governance-artifacts.js";
 export * from "./version.js";
 export * from "./quality.js";
+export * from "./quality-remediation.js";
 export * from "./risk.js";
 export * from "./knowledge-graph.js";
 export * from "./graph-query.js";

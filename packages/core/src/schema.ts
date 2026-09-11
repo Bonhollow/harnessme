@@ -198,10 +198,12 @@ export const HarnessQualitySchema = z.object({
     detail: z.string().min(1),
   })).default([]),
   findings: z.array(z.object({
+    checkId: z.string().min(1).optional(),
     severity: z.enum(["critical", "high", "medium", "low"]),
     dimension: z.enum(["evidence", "navigation", "operations", "documentation", "governance"]),
     message: z.string().min(1),
     action: z.string().min(1),
+    recoverablePoints: z.number().nonnegative().optional(),
   })).default([]),
 });
 

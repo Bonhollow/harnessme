@@ -4,6 +4,7 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
+import { planQualityRemediations, type QualityRemediation } from "@harnessme/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import syncCommand from "../commands/sync.js";
@@ -25,14 +26,6 @@ interface Action {
   label: string;
   description: string;
   prepare: () => Promise<Operation | undefined>;
-}
-
-type QualityImprovement = "refresh-ai" | "refresh-deterministic" | "features" | "gates";
-
-function recommendedQualityImprovement(dimension: string): QualityImprovement {
-  if (dimension === "governance") return "gates";
-  if (dimension === "navigation") return "features";
-  return "refresh-ai";
 }
 
 async function selectOption(
@@ -145,32 +138,47 @@ async function showQualityReport(root: string): Promise<void> {
   renderer.destroy();
 }
 
-async function chooseQualityImprovement(root: string): Promise<QualityImprovement | undefined> {
+async function chooseQualityImprovement(root: string): Promise<QualityRemediation | undefined> {
   const report = await loadQualityReport(root);
-  const finding = await selectOption(
-    "Improve quality",
-    `${report.quality.score}/100 · Select the gap to address. Each choice leads to a concrete remediation workflow.`,
-    [
-      ...report.quality.findings.slice(0, 6).map((item, index) => ({
-        name: `${index + 1}. ${item.dimension} · ${item.severity}`,
-        description: `${item.message}  →  ${item.action}`,
-        value: item.dimension,
-      })),
-      { name: "Refresh the whole assessment", description: "Regenerate guidance and reassess all quality dimensions.", value: "refresh" },
-    ],
-  );
-  if (!finding) return undefined;
-  const recommendation = finding.value === "refresh" ? "refresh-ai" : recommendedQualityImprovement(String(finding.value));
+  const plans = planQualityRemediations(report.quality);
+  if (!plans.length) {
+    await selectOption("Quality at target", "Every quality check is currently passing.", [
+      { name: "Return to dashboard", description: "No remediation is required.", value: "back" },
+    ]);
+    return undefined;
+  }
   const selected = await selectOption(
-    "Choose remediation",
-    `Recommended: ${recommendation === "gates" ? "review critical paths" : recommendation === "features" ? "map features and tests" : "regenerate the harness with AI"}.`,
+    "Improve quality",
+    `${report.quality.score}/100 · Select a failed check. Projected scores assume that check is fully recovered.`,
+    plans.map((plan, index) => ({
+      name: `${index + 1}. ${plan.title} · +${plan.recoverablePoints} pts`,
+      description: `${plan.diagnosis}  →  ${plan.action}  ·  projected ${plan.currentScore} → ${plan.projectedScore}`,
+      value: plan.id,
+    })),
+  );
+  const plan = plans.find((candidate) => candidate.id === selected?.value);
+  if (!plan) return undefined;
+  const confirmed = await selectOption(
+    plan.title,
+    `${plan.action}\n\nCurrent ${plan.currentScore}/100 · projected up to ${plan.projectedScore}/100 (+${plan.recoverablePoints})`,
     [
-      { name: "Use recommended workflow", description: "Open the workflow most likely to improve this quality gap.", value: recommendation },
-      { name: "Refresh with AI", description: "Regenerate instructions, guides, and the knowledge graph with the configured provider.", value: "refresh-ai" },
-      { name: "Refresh deterministically", description: "Reassess and regenerate without model inference.", value: "refresh-deterministic" },
+      { name: "Apply recommended workflow", description: `Run ${plan.workflow} and verify this check afterward.`, value: true },
+      { name: "Back", description: "Choose another quality gap without making changes.", value: false },
     ],
   );
-  return selected?.value as QualityImprovement | undefined;
+  return confirmed?.value === true ? plan : undefined;
+}
+
+function withQualityVerification(root: string, plan: QualityRemediation, operation: Operation): Operation {
+  return async (onOutput) => {
+    onOutput(`Target: ${plan.title}\nProjected quality: ${plan.currentScore} → up to ${plan.projectedScore}/100\n`);
+    await operation(onOutput);
+    const after = await loadQualityReport(root);
+    const resolved = !after.quality.findings.some((finding) => finding.checkId === plan.id);
+    const delta = after.quality.score - plan.currentScore;
+    onOutput(`\nQuality verification: ${plan.currentScore} → ${after.quality.score}/100 (${delta >= 0 ? "+" : ""}${delta})\n`);
+    onOutput(resolved ? `✓ ${plan.title} is now at target.\n` : `○ ${plan.title} still needs work: ${after.quality.findings.find((finding) => finding.checkId === plan.id)?.action ?? plan.action}\n`);
+  };
 }
 
 async function confirmRemoval(): Promise<boolean> {
@@ -260,22 +268,26 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         return undefined;
       } },
       { label: "Improve quality", description: "Choose a weak quality area and open its recommended remediation workflow.", prepare: async () => {
-        const improvement = await chooseQualityImprovement(root);
-        if (!improvement) return undefined;
-        if (improvement === "gates") {
-          const plan = await manageGates(root);
-          if (!plan || (!plan.activate.length && !plan.remove.length && !plan.add)) return undefined;
-          return async (onOutput) => {
-            for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
-            for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
-            if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
+        const remediation = await chooseQualityImprovement(root);
+        if (!remediation) return undefined;
+        if (remediation.workflow === "gates") {
+          const gatePlan = await manageGates(root);
+          if (!gatePlan || (!gatePlan.activate.length && !gatePlan.remove.length && !gatePlan.add)) return undefined;
+          const operation: Operation = async (onOutput) => {
+            for (const glob of gatePlan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
+            for (const glob of gatePlan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+            if (gatePlan.add) await runDashboardCommand(root, addCriticalCommand, gatePlan.add, onOutput);
           };
+          return withQualityVerification(root, remediation, operation);
         }
-        if (improvement === "features") {
-          const plan = await manageFeatures(root);
-          return plan ? featureOperation(root, plan) : undefined;
+        if (remediation.workflow === "features") {
+          const featurePlan = await manageFeatures(root);
+          return featurePlan ? withQualityVerification(root, remediation, featureOperation(root, featurePlan)) : undefined;
         }
-        return async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: improvement === "refresh-deterministic" }, onOutput);
+        return withQualityVerification(root, remediation, async (onOutput) => runDashboardCommand(root, refreshCommand, {
+          deterministic: remediation.workflow === "refresh-deterministic",
+          details: `Quality remediation focus: ${remediation.action}`,
+        }, onOutput));
       } },
       { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
         const plan = await manageGates(root);

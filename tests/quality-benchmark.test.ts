@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { FactsSnapshot } from "../packages/core/src/facts-store.js";
 import { assessHarnessQuality } from "../packages/core/src/quality.js";
+import { planQualityRemediations } from "../packages/core/src/quality-remediation.js";
 import { classifyRisk } from "../packages/core/src/risk.js";
 import { criticalCandidates } from "../packages/analyzers/src/critical-candidates.js";
 import { analyzeDocumentation } from "../packages/analyzers/src/documentation.js";
@@ -86,6 +87,19 @@ describe("harness quality benchmark", () => {
     shallow.conventions.facts = [];
     shallow.referencePack = undefined;
     expect(assessHarnessQuality(shallow).score).toBeLessThan(25);
+  });
+
+  it("creates an executable remediation plan for every failed quality check", () => {
+    const quality = assessHarnessQuality(snapshot("# Stack\n\nTypeScript.\n"));
+    const plans = planQualityRemediations(quality);
+    expect(plans).toHaveLength(quality.findings.length);
+    expect(plans.every((plan) => plan.projectedScore >= quality.score && plan.recoverablePoints > 0)).toBe(true);
+    expect(plans).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "semantic-coverage", workflow: "features" }),
+      expect.objectContaining({ id: "critical-review", workflow: "gates" }),
+      expect.objectContaining({ id: "dependency-density", workflow: "refresh-deterministic" }),
+      expect.objectContaining({ id: "operating-contract", workflow: "refresh-ai" }),
+    ]));
   });
 
   it("awards an excellent score only to a comprehensive evidence and navigation fixture", () => {

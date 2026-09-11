@@ -41,7 +41,7 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 1. **Dashboard** — inspect harness health, provider/model settings, safety-gate counts, and every generated harness document. Use `[` / `]` or Tab to switch the root contract, scoped guides, agent pack, critical policy, and nested module contracts.
 2. **Guided configuration** — choose a provider, model, Codex thinking level, review depth, and optional context without remembering flags.
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
-4. **Quality intelligence** — compare evidence, navigation, operations, documentation, and governance with coverage charts and ranked corrective actions.
+4. **Quality intelligence and remediation** — compare evidence, navigation, operations, documentation, and governance, then select any failed check to see its recoverable points, projected score, recommended workflow, and verified result.
 5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
 6. **Knowledge Graph** — stay inside the terminal and press `G` to switch between the structured relationship view and a lightweight force-directed map.
 
@@ -65,7 +65,7 @@ The complete command and critical-change workflow reference is available further
 - Nested module guides with responsibilities, extension seams, invariants, coupled-change impact, and exact validation.
 - `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
 - Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
-- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, dependency density, test linkage, guide depth, assessment confidence, and ranked findings. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
+- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, dependency density, test linkage, guide depth, assessment confidence, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
 - A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and terminal explorer with structured and force-directed views.
 
 ## Requirements

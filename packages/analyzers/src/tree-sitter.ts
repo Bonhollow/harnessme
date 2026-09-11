@@ -58,7 +58,7 @@ export interface AstSignals {
   catches: Array<{ line: number; excerpt: string }>;
   classes: number;
   inheritedClasses: Array<{ line: number; excerpt: string }>;
-  imports: string[];
+  imports: Array<{ specifier: string; line: number; excerpt: string }>;
   testCalls: Array<{ line: number; excerpt: string }>;
   dependencyInjection: Array<{ line: number; excerpt: string }>;
   repositoryPatterns: Array<{ line: number; excerpt: string }>;
@@ -79,8 +79,8 @@ function sourceSignals(source: string, pattern: RegExp): Array<{ line: number; e
   return signals;
 }
 
-function importSpecifiers(source: string, grammar: string): string[] {
-  const imports = new Set<string>();
+function importSpecifiers(source: string, grammar: string): Array<{ specifier: string; line: number; excerpt: string }> {
+  const imports = new Map<string, { specifier: string; line: number; excerpt: string }>();
   const pattern = grammar === "python"
     ? /^\s*(?:from\s+([.\w]+)\s+import|import\s+([.\w]+))/gmu
     : grammar === "cpp"
@@ -98,9 +98,12 @@ function importSpecifiers(source: string, grammar: string): string[] {
           : /\b(?:from\s*|import\s*\(?)['"]([^'"]+)['"]/gu;
   for (const match of source.matchAll(pattern)) {
     const value = match[1] ?? match[2];
-    if (value) imports.add(value);
+    if (value && match.index !== undefined && !imports.has(value)) {
+      const line = source.slice(0, match.index).split("\n").length;
+      imports.set(value, { specifier: value, line, excerpt: match[0].trim().slice(0, 180) });
+    }
   }
-  return [...imports];
+  return [...imports.values()];
 }
 
 export async function analyzeAst(path: string): Promise<AstSignals | undefined> {

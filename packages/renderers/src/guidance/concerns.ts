@@ -78,6 +78,10 @@ Use this guide for changes in \`${concern.scope}\`.
 - Keep changes through the existing implementation and interfaces under \`${concern.directory}/\`.
 - Inspect callers, consumers, and focused tests before editing.
 
+## Extension seams
+
+- Extend behavior through the existing owning interface in the paths below; do not introduce a competing implementation.
+
 ## Ownership map
 
 Start investigation with these detected implementation paths:
@@ -88,6 +92,10 @@ ${ownership}
 
 ${citations || "- No semantic invariant was verified deterministically; inspect the ownership map and nearby tests before changing behavior."}
 - Preserve public behavior and update coupled consumers together.
+
+## Change impact
+
+- Trace importers, tests, documentation, and public or persisted consumers of every changed path.
 
 ## Anti-patterns
 
@@ -104,6 +112,10 @@ ${citations || "- No semantic invariant was verified deterministically; inspect 
 ## Validation
 
 ${validation}
+
+## Maintenance triggers
+
+- Refresh this guide when ownership, extension seams, invariants, or validation commands in this scope change.
 `,
     };
   });

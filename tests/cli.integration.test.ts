@@ -108,7 +108,9 @@ describe("CLI", () => {
 
     const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic", "--details", "The API must remain compatible with external evaluators."]);
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(refreshed.stdout).toContain("Refreshed 10 managed artifact(s)");
+    expect(refreshed.stdout).toContain("Refreshed 12 managed artifact(s)");
+    expect(JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8"))).toEqual(expect.objectContaining({ schemaVersion: 1 }));
+    expect(await readFile(join(root, ".harnessme", "FEATURES.md"), "utf8")).toContain("# Feature navigation");
     expect(agents).toContain("preserve this maintainer note");
     expect(agents).toContain("The API must remain compatible with external evaluators.");
     expect(agents).toContain(".harnessme/references/repository-workflow.md");
@@ -511,5 +513,32 @@ const value = schema.includes("harnessme_facts")
     await exec("git", ["add", `.harnessme/critical-log/${deletionRecord}`, ".harnessme/CRITICAL.md"], { cwd: root });
     const deletionPassed = await exec(process.execPath, [cli, "critical-gate", "--root", root]);
     expect(deletionPassed.stdout).toContain("Critical gate passed");
+  }, 30_000);
+
+  it("manages feature overrides and detects edited graph documents", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-features-"));
+    await mkdir(join(root, "src"));
+    await mkdir(join(root, "tests"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "feature-fixture", scripts: { test: "node --test" } }));
+    await writeFile(join(root, "src", "auth.ts"), "export const authenticate = () => true;\n");
+    await writeFile(join(root, "src", "session.ts"), "export const session = true;\n");
+    await writeFile(join(root, "tests", "auth.test.ts"), "import { authenticate } from '../src/auth.js';\nvoid authenticate;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    await exec(process.execPath, [cli, "feature", "add", "authentication", "--title", "Authentication", "--summary", "Authenticates requests", "--scopes", "src/auth.ts", "--root", root]);
+    await exec(process.execPath, [cli, "feature", "add", "sessions", "--title", "Sessions", "--summary", "Maintains sessions", "--scopes", "src/session.ts", "--root", root]);
+    await exec(process.execPath, [cli, "feature", "link", "authentication", "sessions", "--kind", "depends-on", "--root", root]);
+    const graph = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string; kind: string }> };
+    expect(graph.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "feature:authentication" }), expect.objectContaining({ id: "feature:sessions" })]));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "feature:sessions", kind: "depends-on" }));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "test:tests/auth.test.ts", kind: "verified-by" }));
+    expect(await readFile(join(root, ".harnessme", "features", "authentication.md"), "utf8")).toContain("## Agent support");
+
+    await writeFile(join(root, ".harnessme", "FEATURES.md"), "edited\n");
+    await expect(exec(process.execPath, [cli, "check", "--ci", "--root", root])).rejects.toMatchObject({ code: 1 });
+    await exec(process.execPath, [cli, "sync", "--root", root]);
+    expect((await exec(process.execPath, [cli, "check", "--ci", "--root", root])).stdout).toContain("no drift detected");
+    await exec(process.execPath, [cli, "feature", "remove", "sessions", "--root", root]);
+    const updated = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }> };
+    expect(updated.nodes.some((node) => node.id === "feature:sessions")).toBe(false);
   }, 30_000);
 });

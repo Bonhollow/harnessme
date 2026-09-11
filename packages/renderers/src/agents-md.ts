@@ -33,9 +33,14 @@ function occurrences(value: string, needle: string): number {
 }
 
 function addAgentPackLinks(markdown: string): string {
-  const links = "- [Architecture and change map](.harnessme/agent-pack/architecture.md): Start here for module routing, task guides, and cross-module change rules.\n- [Testing and validation](.harnessme/agent-pack/testing-and-validation.md): Choose focused coverage and the required verification ladder.\n- [Critical change audit](.harnessme/agent-pack/critical-change-audit.md): Required record standard after a developer confirms a protected edit.";
-  if (markdown.includes(".harnessme/agent-pack/architecture.md")) return markdown;
-  return markdown.replace("## Reference map", `## Reference map\n\n${links}`);
+  const links = "- [Feature navigation](.harnessme/FEATURES.md): Start here to identify the owning feature, implementation paths, dependencies, tests, and protected areas.\n- [Architecture and change map](.harnessme/agent-pack/architecture.md): Use for module routing, task guides, and cross-module change rules.\n- [Testing and validation](.harnessme/agent-pack/testing-and-validation.md): Choose focused coverage and the required verification ladder.\n- [Critical change audit](.harnessme/agent-pack/critical-change-audit.md): Required record standard after a developer confirms a protected edit.";
+  const missing = links.split("\n").filter((link) => !markdown.includes(link.match(/\(([^)]+)\)/u)?.[1] ?? ""));
+  if (!missing.length) return markdown;
+  if (markdown.includes("## Reference map")) return markdown.replace("## Reference map", `## Reference map\n\n${missing.join("\n")}`);
+  const firstHeadingEnd = markdown.indexOf("\n", markdown.indexOf("# "));
+  return firstHeadingEnd >= 0
+    ? `${markdown.slice(0, firstHeadingEnd)}\n\n## Reference map\n\n${missing.join("\n")}${markdown.slice(firstHeadingEnd)}`
+    : `## Reference map\n\n${missing.join("\n")}\n\n${markdown}`;
 }
 
 export function renderAgentsMd(facts: FactsSnapshot, pending = ""): string {

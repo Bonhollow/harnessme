@@ -1,6 +1,8 @@
 import type { AnalysisResult } from "@harnessme/analyzers";
 import type { FactsSnapshot } from "./facts-store.js";
 import { minimatch } from "minimatch";
+import { createKnowledgeArtifacts } from "./knowledge-graph.js";
+import { defaultFeatureOverrides, defaultFeaturePack } from "./schema.js";
 
 export interface DriftItem {
   severity: "error" | "warning";
@@ -89,6 +91,27 @@ export function detectDrift(current: AnalysisResult, committed: FactsSnapshot): 
           message: `Critical candidate is not registered: ${hotspot.path} (${hotspot.changes} changes, ${hotspot.fanIn} inbound imports, score ${hotspot.score})`,
         });
       }
+    }
+  }
+  if (current.structure && committed.structure) {
+    const oldFiles = committed.structure.files.map((item) => `${item.kind}:${item.path}`);
+    const newFiles = current.structure.files.map((item) => `${item.kind}:${item.path}`);
+    const oldImports = committed.structure.imports.map((item) => `${item.from}->${item.to}`);
+    const newImports = current.structure.imports.map((item) => `${item.from}->${item.to}`);
+    const addedFiles = setDifference(newFiles, oldFiles);
+    const removedFiles = setDifference(oldFiles, newFiles);
+    const addedImports = setDifference(newImports, oldImports);
+    const removedImports = setDifference(oldImports, newImports);
+    if (addedFiles.length || removedFiles.length) drift.push({ severity: "warning", category: "graph", message: `Feature graph structure changed: ${addedFiles.length} file(s) added and ${removedFiles.length} removed.` });
+    if (addedImports.length || removedImports.length) drift.push({ severity: "warning", category: "graph", message: `Feature graph imports changed: ${addedImports.length} edge(s) added and ${removedImports.length} removed.` });
+  }
+  if (committed.structure && committed.knowledgeGraph && committed.referencePack) {
+    try {
+      const expected = createKnowledgeArtifacts({ structure: committed.structure, features: committed.featurePack ?? defaultFeaturePack(committed.structure.generatedAt), references: committed.referencePack, criticalPaths: committed.criticalPaths, overrides: committed.featureOverrides ?? defaultFeatureOverrides(), referenceProvenance: committed.generation?.status === "ai-reviewed" ? "ai-reviewed" : "deterministic" }).graph;
+      const canonical = (graph: typeof expected): string => JSON.stringify({ ...graph, generatedAt: "" });
+      if (canonical(expected) !== canonical(committed.knowledgeGraph)) drift.push({ severity: "error", category: "graph", message: "The committed knowledge graph differs from canonical stored facts; run `harnessme sync`." });
+    } catch (error) {
+      drift.push({ severity: "error", category: "graph", message: error instanceof Error ? error.message : String(error) });
     }
   }
   return drift;

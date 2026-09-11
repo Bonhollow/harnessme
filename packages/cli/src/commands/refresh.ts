@@ -12,6 +12,9 @@ import {
   writeJson,
   writeYaml,
   type FactsSnapshot,
+  createKnowledgeArtifacts,
+  defaultFeatureOverrides,
+  defaultFeaturePack,
 } from "@harnessme/core";
 import { analyzeProject, authorHarnessWithAi, criticalCandidates } from "@harnessme/analyzers";
 import { referenceDocuments, renderAgentsMd, syncHarness } from "@harnessme/renderers";
@@ -39,7 +42,6 @@ export default defineCommand({
       .map((value) => value.trim());
     if (suppliedDetails.length) {
       previous.directives = `${previous.directives.trimEnd()}\n\n## ${new Date().toISOString().slice(0, 10)} — Maintainer project context\n\n${suppliedDetails.join("\n\n")}\n`;
-      await atomicWrite(join(base, "facts", "directives.md"), previous.directives);
     }
     const progress = createProgress(previous.config.analysis.aiFallback && !args.deterministic ? 7 : 5);
     progress.step("Loading maintainer directives, approvals, and pending updates");
@@ -115,6 +117,7 @@ export default defineCommand({
         councilSize: previous.config.analysis.councilSize,
         previousHarness: previous.authoredInstructions,
         previousReferences: previous.referencePack?.documents,
+        previousFeatures: previous.featurePack?.features,
         onPhase: (message) => progress.step(message),
       });
       for (const gate of authoredResult.gates) {
@@ -139,6 +142,40 @@ export default defineCommand({
       progress.step("Rendering refreshed deterministic guidance");
     }
 
+    // Validate the complete candidate graph before replacing any analyzed facts.
+    // This keeps stale maintainer overrides from leaving a mixed old/new snapshot.
+    const candidateFeaturePack = {
+      schemaVersion: 1 as const,
+      generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+      features: authoredResult?.features ?? [],
+    };
+    if (analysis.structure) {
+      const candidateSnapshot: FactsSnapshot = {
+        ...previous,
+        conventions: analysis.conventions,
+        stack: analysis.stack,
+        evidence: analysis.evidence,
+        architecture: analysis.architecture,
+        criticalPaths,
+        structure: analysis.structure,
+        featurePack: candidateFeaturePack,
+        authoredInstructions: authoredResult?.markdown,
+        referencePack: authoredResult ? { schemaVersion: 1, generatedAt: analysis.structure.generatedAt, documents: authoredResult.references } : undefined,
+        generation: { status: authoredResult ? "ai-reviewed" : "deterministic", generatedAt: analysis.structure.generatedAt, activatedGates: authoredResult?.gates ?? [] },
+        documentationConflicts: analysis.documentationConflicts,
+      };
+      const documents = authoredResult?.references ?? referenceDocuments(candidateSnapshot);
+      createKnowledgeArtifacts({
+        structure: analysis.structure,
+        features: candidateFeaturePack,
+        references: { schemaVersion: 1, generatedAt: analysis.structure.generatedAt, documents },
+        criticalPaths,
+        overrides: previous.featureOverrides ?? defaultFeatureOverrides(),
+        referenceProvenance: authoredResult ? "ai-reviewed" : "deterministic",
+      });
+    }
+
+    if (suppliedDetails.length) await atomicWrite(join(base, "facts", "directives.md"), previous.directives);
     await writeFacts(root, analysis);
     await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     await writeYaml(join(base, "harnessme.yaml"), previous.config);
@@ -148,6 +185,11 @@ export default defineCommand({
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
         documents: authoredResult.references,
+      });
+      await writeJson(join(base, "facts", "features.json"), {
+        schemaVersion: 1,
+        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+        features: authoredResult.features,
       });
       await writeJson(join(base, "facts", "harness-generation.json"), {
         status: "ai-reviewed",
@@ -163,6 +205,11 @@ export default defineCommand({
     } else {
       await removeIfPresent(join(base, "facts", "AGENTS.authored.md"));
       await removeIfPresent(join(base, "facts", "references.json"));
+      await writeJson(join(base, "facts", "features.json"), {
+        schemaVersion: 1,
+        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+        features: [],
+      });
       await writeJson(join(base, "facts", "harness-generation.json"), {
         status: "deterministic",
         generatedAt: new Date().toISOString(),
@@ -179,6 +226,14 @@ export default defineCommand({
       });
       refreshed = await readFacts(root);
     }
+    if (refreshed.structure) refreshed.knowledgeGraph = createKnowledgeArtifacts({
+      structure: refreshed.structure,
+      features: refreshed.featurePack ?? defaultFeaturePack(refreshed.structure.generatedAt),
+      references: refreshed.referencePack,
+      criticalPaths: refreshed.criticalPaths,
+      overrides: refreshed.featureOverrides ?? defaultFeatureOverrides(),
+      referenceProvenance: refreshed.generation?.status === "ai-reviewed" ? "ai-reviewed" : "deterministic",
+    }).graph;
     const quality = assessHarnessQuality(refreshed, analysis.documentationConflicts ?? [], renderAgentsMd(refreshed));
     await writeJson(join(base, "facts", "quality.json"), quality);
     progress.step("Synchronizing agent and governance artifacts");

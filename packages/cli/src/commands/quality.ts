@@ -12,10 +12,9 @@ export default defineCommand({
     const facts = await readFacts(root);
     const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readText(join(root, "AGENTS.md")));
     const passed = quality.checks.filter((check) => check.passed).length;
-    const failed = quality.checks.filter((check) => !check.passed);
-    const rating = quality.score >= 90 ? "ready" : quality.score >= 70 ? "needs attention" : "needs work";
-    info(`Harness quality: ${quality.score}/100 · ${rating} · ${passed}/${quality.checks.length} dimensions healthy`);
-    for (const check of quality.checks) info(`${check.passed ? "✓" : "✗"} ${String(check.points).padStart(2, " ")} pts  ${check.message}`);
-    if (failed.length) info(`Next best action: ${failed[0]?.message}`);
+    info(`Harness quality: ${quality.score}/100 · ${quality.grade} · confidence ${quality.confidence}% · ${passed}/${quality.checks.length} checks at target`);
+    for (const dimension of quality.dimensions) info(`${dimension.label.padEnd(14)} ${String(dimension.score).padStart(3)}%  ${dimension.earned}/${dimension.maxPoints} pts  ${dimension.summary}`);
+    for (const metric of quality.metrics) info(`${metric.label.padEnd(18)} ${String(metric.percentage).padStart(3)}%  ${metric.value}/${metric.target} ${metric.detail}`);
+    for (const finding of quality.findings) info(`${finding.severity.toUpperCase()} ${finding.dimension}: ${finding.message} Next: ${finding.action}`);
   },
 });

@@ -14,6 +14,10 @@ import { collectProjectDetails } from "./details.js";
 import { loadQualityReport } from "./quality.js";
 import { loadDashboardState } from "./state.js";
 import { buildDashboard, buildOperationScreen, buildQualityReportScreen, buildSelectionScreen } from "./view.js";
+import { exploreGraph } from "./graph.js";
+import { manageFeatures } from "./features.js";
+import type { FeaturePlan } from "./features.js";
+import { add as addFeatureCommand, edit as editFeatureCommand, link as linkFeatureCommand, remove as removeFeatureCommand, unlink as unlinkFeatureCommand } from "../commands/feature.js";
 
 type Operation = (onOutput: OperationOutput) => Promise<void>;
 
@@ -145,6 +149,20 @@ async function confirmRemoval(): Promise<boolean> {
   return selected?.value === true;
 }
 
+function featureOperation(root: string, plan: FeaturePlan): Operation {
+  return async (onOutput) => {
+    const command = plan.kind === "add" ? addFeatureCommand : plan.kind === "edit" ? editFeatureCommand : plan.kind === "remove" ? removeFeatureCommand : plan.kind === "link" ? linkFeatureCommand : unlinkFeatureCommand;
+    const args = plan.kind === "add"
+      ? { slug: plan.slug, title: plan.title, summary: plan.summary, scopes: plan.scopes, responsibilities: plan.responsibilities, invariants: plan.invariants, validation: plan.validation, kind: "feature" }
+      : plan.kind === "edit"
+        ? { slug: plan.slug, title: plan.title, summary: plan.summary, scopes: plan.scopes, responsibilities: plan.responsibilities, invariants: plan.invariants, validation: plan.validation }
+        : plan.kind === "remove"
+          ? { slug: plan.slug }
+          : { from: plan.from, to: plan.to, kind: plan.relationshipKind };
+    await runDashboardCommand(root, command, args, onOutput);
+  };
+}
+
 async function dashboardSelection(root: string, actions: Action[]): Promise<Action | undefined> {
   const renderer: CliRenderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
   const state = await loadDashboardState(root);
@@ -175,6 +193,16 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
   while (running) {
     const state = await loadDashboardState(root);
     const actions: Action[] = state.initialized ? [
+      { label: "Explore knowledge graph", description: "Browse feature ownership, dependencies, tests, evidence, and protected paths.", prepare: async () => {
+        if (await exploreGraph(root) !== "manage") return undefined;
+        const plan = await manageFeatures(root);
+        return plan ? featureOperation(root, plan) : undefined;
+      } },
+      { label: "Manage features", description: "Add, correct, or remove maintainer-owned feature metadata.", prepare: async () => {
+        const plan = await manageFeatures(root);
+        if (!plan) return undefined;
+        return featureOperation(root, plan);
+      } },
       { label: "Refresh with AI", description: "Use the configured provider/model and optionally add project context.", prepare: async () => {
         const details = await collectProjectDetails("Refresh details · optional");
         return details === null ? undefined : async (onOutput) => runDashboardCommand(root, refreshCommand, { deterministic: false, details }, onOutput);

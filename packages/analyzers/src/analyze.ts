@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { basename, dirname, extname, join, normalize } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import fg from "fast-glob";
 import {
   posixPath,
@@ -16,6 +16,7 @@ import { packageFacts } from "./packages.js";
 import { analyzeWithAiFallback } from "./ai-fallback.js";
 import { InferenceUnavailableError } from "./inference.js";
 import { analyzeDocumentation } from "./documentation.js";
+import { createImportResolver } from "./import-resolver.js";
 
 const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,ini,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
 const languageByExtension: Record<string, string> = {
@@ -73,39 +74,6 @@ function renderArchitecture(
   return `# Observed architecture\n\nThis document is generated from the repository structure. Log material changes in the generated \`AGENTS.md\` pending section, then run \`harnessme validate\` to refresh these facts.\n\n## Project\n\n${projectName}\n\n## Languages\n\n${languageText}.\n\n## Top-level module boundaries\n\n${moduleLines}\n\n## Import hubs\n\n${fanInLines}\n\n## Verified model-assisted observations\n\n${inferredLines}\n`;
 }
 
-function resolveImport(from: string, specifier: string, files: Set<string>): string | undefined {
-  let base: string;
-  const extension = extname(from).toLowerCase();
-  if (specifier.startsWith(".")) base = posixPath(normalize(join(dirname(from), specifier)));
-  else if (extension === ".py") base = specifier.replaceAll(".", "/");
-  else if ([".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rb", ".sh", ".bash"].includes(extension)) {
-    base = posixPath(normalize(join(dirname(from), specifier)));
-  } else if (extension === ".rs") {
-    const parts = specifier.replace(/^(?:crate|self|super)::/u, "").replaceAll("::", "/");
-    const start = specifier.startsWith("crate::") ? "src" : specifier.startsWith("super::") ? join(dirname(from), "..") : dirname(from);
-    base = posixPath(normalize(join(start, parts)));
-  } else if ([".java", ".cs", ".php"].includes(extension)) {
-    const suffix = `${specifier.replaceAll("\\", "/").replaceAll(".", "/")}${extension}`;
-    return [...files].find((file) => file.endsWith(suffix));
-  } else if (extension === ".go") {
-    const directory = specifier.split("/").at(-1);
-    if (!directory) return undefined;
-    return [...files].find((file) => {
-      const parent = posixPath(dirname(file));
-      return file.endsWith(".go") && (parent === directory || parent.endsWith(`/${directory}`));
-    });
-  } else return undefined;
-  const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rb", ".rs", ".sh", ".bash", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"];
-  for (const suffix of extensions) {
-    if (files.has(`${base}${suffix}`)) return `${base}${suffix}`;
-  }
-  for (const suffix of extensions.slice(1)) {
-    if (files.has(`${base}/index${suffix}`)) return `${base}/index${suffix}`;
-    if (files.has(`${base}/mod${suffix}`)) return `${base}/mod${suffix}`;
-  }
-  return undefined;
-}
-
 export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisResult> {
   const { root, exclude, maxFileBytes } = options;
   const files = await fg(sourcePatterns, {
@@ -130,7 +98,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   let firstDependencyInjectionEvidence: string | undefined;
   let firstRepositoryEvidence: string | undefined;
   let firstResultEvidence: string | undefined;
-  const importsByFile = new Map<string, string[]>();
+  const importsByFile = new Map<string, Array<{ specifier: string; line: number; excerpt: string }>>();
   let inferredArchitecture: Array<{ statement: string; path: string; line: number }> = [];
   let aiInputs: AnalysisResult["aiInputs"];
   let authorContext: string | undefined;
@@ -266,10 +234,17 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     ? ((JSON.parse(packageJson) as { name?: string }).name ?? basename(root))
     : basename(root);
   const sourceFiles = new Set(files.map(posixPath));
+  const resolveImport = await createImportResolver(root, sourceFiles);
+  const moduleScopes = (await fg("**/AGENTS.md", { cwd: root, onlyFiles: true, ignore: exclude }))
+    .map((path) => posixPath(dirname(path)))
+    .filter((path) => path !== ".")
+    .sort((left, right) => right.length - left.length);
+  const moduleFor = (path: string): string | undefined => moduleScopes.find((scope) => path.startsWith(`${scope}/`))
+    ?? (path.includes("/") ? path.split("/")[0] : undefined);
   const fanIn = new Map<string, number>();
   for (const [from, imports] of importsByFile) {
-    for (const specifier of imports) {
-      const target = resolveImport(from, specifier, sourceFiles);
+    for (const item of imports) {
+      const target = resolveImport(from, item.specifier);
       if (target) fanIn.set(target, (fanIn.get(target) ?? 0) + 1);
     }
   }
@@ -297,5 +272,19 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
       .filter((item, index, items) => items.findIndex((candidate) =>
         candidate.document === item.document && candidate.line === item.line && candidate.reference === item.reference
       ) === index),
+    structure: {
+      schemaVersion: 1,
+      generatedAt: now,
+      files: [...sourceFiles].sort().map((path) => ({
+        path,
+        kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const,
+        module: moduleFor(path),
+      })),
+      imports: [...importsByFile].flatMap(([from, imports]) => imports.flatMap((item) => {
+        const to = resolveImport(from, item.specifier);
+        return to ? [{ from, to, line: item.line, excerpt: item.excerpt }] : [];
+      })).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.line - b.line),
+      documents: documentation.paths,
+    },
   };
 }

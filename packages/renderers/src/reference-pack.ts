@@ -62,10 +62,22 @@ Use this guide for changes in ${path}.
 - Identify the owning implementation and its public callers before editing.
 - Keep behavior inside the existing module seam unless repository evidence requires a coordinated change.
 
+## Extension seams
+
+- Extend behavior through the nearest established interface; do not duplicate the implementation in a caller.
+
 ## Invariants
 
 ${groundedRules}
 - Treat cross-module effects as compatibility work and update affected consumers together.
+
+## Change impact
+
+- Trace callers, tests, documentation, persistence, and public consumers before changing shared behavior.
+
+## Anti-patterns
+
+- Do not bypass the owning interface or invent validation commands.
 
 ## Change workflow
 
@@ -77,6 +89,10 @@ ${groundedRules}
 ## Validation
 
 ${commands}
+
+## Maintenance triggers
+
+- Refresh this guide when module ownership, invariants, or validation commands change.
 `,
     };
   });

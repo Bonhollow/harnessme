@@ -41,8 +41,9 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 1. **Dashboard** — inspect harness health, provider/model settings, safety-gate counts, and every generated harness document. Use `[` / `]` or Tab to switch the root contract, scoped guides, agent pack, critical policy, and nested module contracts.
 2. **Guided configuration** — choose a provider, model, Codex thinking level, review depth, and optional context without remembering flags.
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
-4. **Quality intelligence** — see each quality dimension, documentation conflicts, and the next best action.
+4. **Quality intelligence** — compare evidence, navigation, operations, documentation, and governance with coverage charts and ranked corrective actions.
 5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
+6. **Knowledge Graph** — explore stable feature, module, file, test, documentation, dependency, and protected-path relationships without leaving the terminal.
 
 ### CLI commands
 
@@ -53,6 +54,7 @@ harnessme init             # create a harness non-interactively or with prompts
 harnessme refresh          # update it after repository changes
 harnessme quality          # report quality dimensions and next best action
 harnessme check --ci       # fail CI when repository facts have drifted
+harnessme feature list     # inspect semantic features in the committed graph
 ```
 
 The complete command and critical-change workflow reference is available further down this README.
@@ -63,7 +65,8 @@ The complete command and critical-change workflow reference is available further
 - Nested module guides with responsibilities, extension seams, invariants, coupled-change impact, and exact validation.
 - `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
 - Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
-- A dashboard and `harnessme quality` scorecard that show what is healthy, what is missing, and the next best action.
+- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, dependency density, test linkage, guide depth, assessment confidence, and ranked findings. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
+- A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and interactive dashboard explorer.
 
 ## Requirements
 
@@ -81,13 +84,14 @@ When `harnessme init` runs, it:
 1. Scans supported source files with bundled syntax-tree grammars and reads repository configuration and documentation.
 2. Reads package metadata, formatter and linter settings, type configuration, contribution documentation, and Git history.
 3. Detects the project purpose, repository structure, coding conventions, domain invariants, module ownership, validation commands, import hubs, frequently changed files, and documentation references that no longer match the implementation.
-4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation.
+4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation; local imports retain their source lines for graph evidence.
 5. Builds a deterministic `AGENTS.md` baseline and a bounded list of possible critical files and modules.
 6. Uses a four-stage model pipeline when AI is enabled: evidence extraction, independent claim verification, harness/reference authorship, and final baseline comparison. The author and reviewers receive the same bounded, redacted repository context; it is never stored. The review council validates every candidate and selects the strongest valid result based on concrete paths, symbols, citations, workflows, and scoped coverage. A focused repair pass runs only when local validation rejects every candidate.
-7. Authors a concise repository-specific root `AGENTS.md`, a dedicated agent pack with architecture routing and a critical-change audit standard, and concern-focused executable change manuals. Each scoped guide identifies responsibilities, supported extension seams, invariants, coupled change impact, anti-patterns, workflows, validation, and maintenance triggers. HarnessME then places detailed nested `AGENTS.md` operating contracts in the applicable module directories. Cross-cutting guides can cover multiple concrete scopes. Obsolete managed module guides are removed on refresh.
-8. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
-9. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, scoped references, and documentation consistency.
-10. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
+7. Authors a concise repository-specific root `AGENTS.md`, reviewed semantic feature definitions, a dedicated agent pack with architecture routing and a critical-change audit standard, and concern-focused executable change manuals. Each scoped guide identifies responsibilities, supported extension seams, invariants, coupled change impact, anti-patterns, workflows, validation, and maintenance triggers. HarnessME then places detailed nested `AGENTS.md` operating contracts in the applicable module directories. Cross-cutting guides can cover multiple concrete scopes. Obsolete managed module guides are removed on refresh.
+8. Builds `.harnessme/knowledge-graph.json`, `.harnessme/FEATURES.md`, and focused feature guides. Deterministic runs map modules, files, tests, imports, documentation, and critical paths; reviewed AI runs add evidence-backed feature meaning. Maintainer overrides always win.
+9. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
+10. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, feature navigation, scoped references, and documentation consistency.
+11. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
 
 Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. Application source files are analyzed but not rewritten.
 
@@ -150,7 +154,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme scan` | Report analysis drift without writing. | No command-specific options. |
 | `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
 | `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>` |
-| `harnessme quality` | Score the harness and list missing operational guidance or documentation conflicts. | No command-specific options. |
+| `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
 | `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail if committed facts have drifted. | `--ci` |
 | `harnessme directive add <text>` | Add a maintainer-authored instruction. | — |
@@ -166,6 +170,12 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme hooks status` | Report whether the local gate is installed. | — |
 | `harnessme providers list` | List selectable inference providers. | — |
 | `harnessme targets list` | List generated integration targets. | — |
+| `harnessme feature list` | List features and concerns in the knowledge graph. | — |
+| `harnessme feature add <slug>` | Add a maintainer-owned feature definition. | `--title`, `--summary`, and comma-separated `--scopes` are required; `--kind feature\|concern` is optional. |
+| `harnessme feature edit <slug>` | Override generated feature metadata. | Optional `--title`, `--summary`, and `--scopes`. |
+| `harnessme feature remove <slug>` | Remove a manual feature or exclude a generated feature. | — |
+| `harnessme feature link <from> <to>` | Add a feature relationship. | `--kind depends-on\|related-to`. |
+| `harnessme feature unlink <from> <to>` | Remove or exclude a feature relationship. | `--kind depends-on\|related-to`. |
 
 `--provider` and `--review-provider` select inference runtimes. `--targets` selects generated instruction formats; the two settings are intentionally independent. The HTTP provider requires `--ai-endpoint` and `--model`; HTTP review requires `--review-ai-endpoint` and `--review-model`.
 
@@ -178,6 +188,7 @@ harnessme quality              # show the harness quality score and missing guid
 harnessme validate             # verify pending notes from AGENTS.md
 harnessme sync                 # regenerate provider files
 harnessme check --ci           # fail when facts have drifted
+harnessme feature add authentication --title "Authentication" --summary "Request identity and session enforcement" --scopes "src/auth/**,tests/auth/**"
 ```
 
 Add a project policy that cannot be inferred from source code:

@@ -1,4 +1,4 @@
-import type { AiFallbackConfig, AiReviewConfig, Conventions, DocumentationConflict, Evidence, Stack } from "@harnessme/core";
+import type { AiFallbackConfig, AiReviewConfig, Conventions, DocumentationConflict, Evidence, RepositoryStructure, Stack } from "@harnessme/core";
 
 export interface AnalysisResult {
   conventions: Conventions;
@@ -13,6 +13,7 @@ export interface AnalysisResult {
   sourceFiles: string[];
   commands: string[];
   documentationConflicts?: DocumentationConflict[];
+  structure?: RepositoryStructure;
 }
 
 export interface AnalyzeOptions {

@@ -21,6 +21,8 @@ export interface DashboardState {
   activeGates: number;
   proposedGates: number;
   references: number;
+  graphNodes: number;
+  graphEdges: number;
   documents: DashboardDocument[];
 }
 
@@ -61,6 +63,8 @@ export async function loadDashboardState(root: string): Promise<DashboardState> 
     activeGates: 0,
     proposedGates: 0,
     references: 0,
+    graphNodes: 0,
+    graphEdges: 0,
     documents: [{
       label: "Getting started",
       path: "",
@@ -73,6 +77,7 @@ export async function loadDashboardState(root: string): Promise<DashboardState> 
   await addDocument(documents, root, "Root AGENTS", "AGENTS.md");
   await addDocument(documents, root, "AI authored", ".harnessme/facts/AGENTS.authored.md");
   await addDocument(documents, root, "Critical paths", ".harnessme/CRITICAL.md");
+  await addDocument(documents, root, "Feature map", ".harnessme/FEATURES.md");
   for (const reference of facts.referencePack?.documents ?? []) {
     await addDocument(documents, root, `Guide · ${reference.slug}`, `.harnessme/references/${reference.slug}.md`);
   }
@@ -95,6 +100,8 @@ export async function loadDashboardState(root: string): Promise<DashboardState> 
     activeGates: facts.criticalPaths.paths.filter((item) => item.status === "active").length,
     proposedGates: facts.criticalPaths.paths.filter((item) => item.status === "proposed").length,
     references: facts.referencePack?.documents.length ?? 0,
+    graphNodes: facts.knowledgeGraph?.nodes.length ?? 0,
+    graphEdges: facts.knowledgeGraph?.edges.length ?? 0,
     documents,
   };
 }

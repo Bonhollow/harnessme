@@ -8,6 +8,10 @@ import {
   HarnessConfigSchema,
   HarnessQualitySchema,
   HarnessGenerationSchema,
+  RepositoryStructureSchema,
+  FeaturePackSchema,
+  FeatureOverridesSchema,
+  KnowledgeGraphSchema,
   ReferencePackSchema,
   StackSchema,
   VerifiedChangesSchema,
@@ -19,11 +23,16 @@ import {
   type HarnessConfig,
   type HarnessQuality,
   type HarnessGeneration,
+  type RepositoryStructure,
+  type FeaturePack,
+  type FeatureOverrides,
+  type KnowledgeGraph,
   type ReferencePack,
   type Stack,
   type VerifiedChanges,
 } from "./schema.js";
 import { atomicWrite, exists, readJson, readText, readYaml, writeJson, writeYaml } from "./files.js";
+import { validateKnowledgeGraph } from "./knowledge-graph.js";
 
 export interface FactsSnapshot {
   config: HarnessConfig;
@@ -39,13 +48,17 @@ export interface FactsSnapshot {
   quality?: HarnessQuality;
   documentationConflicts?: DocumentationConflict[];
   generation?: HarnessGeneration;
+  structure?: RepositoryStructure;
+  featurePack?: FeaturePack;
+  featureOverrides?: FeatureOverrides;
+  knowledgeGraph?: KnowledgeGraph;
 }
 
 export const harnessDir = (root: string): string => join(root, ".harnessme");
 
 export async function writeFacts(
   root: string,
-  data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture"> & {
+  data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture"> & { structure?: RepositoryStructure;
     aiInputs?: Array<{ path: string; bytes: number; redactedLines: number }>;
     documentationConflicts?: DocumentationConflict[];
   },
@@ -59,6 +72,7 @@ export async function writeFacts(
     writeYaml(join(facts, "stack.yaml"), data.stack),
     writeJson(join(facts, "evidence.json"), data.evidence),
     atomicWrite(join(facts, "architecture.md"), data.architecture),
+    ...(data.structure ? [writeJson(join(facts, "structure.json"), data.structure)] : []),
     ...(data.aiInputs ? [writeJson(join(facts, "ai-inputs.json"), {
       generatedAt: new Date().toISOString(),
       files: data.aiInputs,
@@ -76,10 +90,16 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
   const qualityPath = join(facts, "quality.json");
   const conflictsPath = join(facts, "conflicts.json");
   const generationPath = join(facts, "harness-generation.json");
+  const structurePath = join(facts, "structure.json");
+  const featurePackPath = join(facts, "features.json");
+  const featureOverridesPath = join(base, "feature-overrides.yaml");
+  const knowledgeGraphPath = join(base, "knowledge-graph.json");
+  const stack = await readYaml(join(facts, "stack.yaml"), StackSchema);
+  const fallbackGeneratedAt = stack.generatedAt;
   const snapshot = {
     config: await readYaml(join(base, "harnessme.yaml"), HarnessConfigSchema),
     conventions: await readYaml(join(facts, "conventions.yaml"), ConventionsSchema),
-    stack: await readYaml(join(facts, "stack.yaml"), StackSchema),
+    stack,
     evidence: await readJson(join(facts, "evidence.json"), z.array(EvidenceSchema)),
     architecture: await readText(join(facts, "architecture.md")),
     directives: await readText(join(facts, "directives.md")),
@@ -92,6 +112,16 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
     quality: await exists(qualityPath) ? await readJson(qualityPath, HarnessQualitySchema) : undefined,
     documentationConflicts: await exists(conflictsPath) ? await readJson(conflictsPath, z.array(DocumentationConflictSchema)) : undefined,
     generation: await exists(generationPath) ? await readJson(generationPath, HarnessGenerationSchema) : undefined,
+    structure: await exists(structurePath) ? await readJson(structurePath, RepositoryStructureSchema) : {
+      schemaVersion: 1 as const,
+      generatedAt: fallbackGeneratedAt,
+      files: (stack.sourcePaths ?? []).map((path) => ({ path, kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const })),
+      imports: [],
+      documents: stack.documentationPaths ?? [],
+    },
+    featurePack: await exists(featurePackPath) ? await readJson(featurePackPath, FeaturePackSchema) : { schemaVersion: 1 as const, generatedAt: fallbackGeneratedAt, features: [] },
+    featureOverrides: await exists(featureOverridesPath) ? await readYaml(featureOverridesPath, FeatureOverridesSchema) : { schemaVersion: 1 as const, features: [], relationships: [], excludedFeatures: [], excludedRelationships: [] },
+    knowledgeGraph: await exists(knowledgeGraphPath) ? validateKnowledgeGraph(await readJson(knowledgeGraphPath, KnowledgeGraphSchema)) : undefined,
   };
   const evidenceIds = new Set(snapshot.evidence.map((item) => item.id));
   for (const fact of snapshot.conventions.facts) {

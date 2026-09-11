@@ -1,6 +1,5 @@
 import { BoxRenderable, InputRenderable, InputRenderableEvents, TextRenderable, createCliRenderer, type CliRenderer } from "@opentui/core";
-
-const COLORS = { background: "#0b1020", panel: "#121a2e", accent: "#22d3ee", text: "#e2e8f0", muted: "#94a3b8" };
+import { COLORS } from "./theme.js";
 
 function text(renderer: CliRenderer, parent: BoxRenderable, content: string, options: ConstructorParameters<typeof TextRenderable>[1] = {}): void {
   parent.add(new TextRenderable(renderer, { content, fg: COLORS.text, wrapMode: "word", ...options }));

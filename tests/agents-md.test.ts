@@ -72,6 +72,7 @@ describe("AGENTS.md renderer", () => {
     };
     const output = renderAgentsMd(facts);
     expect(output).toContain("## AI-authored guidance");
+    expect(output).toContain(".harnessme/FEATURES.md");
     expect(output).toContain("`src/core.ts` [other]: Shared public contract");
     expect(output).toContain("HARNESSME:PENDING:START");
     expect(output).not.toContain("{{HARNESSME_");

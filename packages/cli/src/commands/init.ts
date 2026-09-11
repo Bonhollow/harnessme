@@ -8,6 +8,9 @@ import {
   defaultConfig,
   defaultCriticalPaths,
   defaultVerifiedChanges,
+  defaultFeatureOverrides,
+  createKnowledgeArtifacts,
+  defaultFeaturePack,
   exists,
   harnessDir,
   readFacts,
@@ -199,6 +202,7 @@ export default defineCommand({
     const criticalPaths = defaultCriticalPaths();
     const initialChanges = defaultVerifiedChanges();
     await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+    await writeYaml(join(base, "feature-overrides.yaml"), defaultFeatureOverrides());
     await writeVerifiedChanges(root, initialChanges);
 
     progress.step("Preserving existing repository instructions");
@@ -334,6 +338,11 @@ export default defineCommand({
         generatedAt: new Date().toISOString(),
         documents: authored.references,
       });
+      await writeJson(join(base, "facts", "features.json"), {
+        schemaVersion: 1,
+        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+        features: authored.features,
+      });
       await writeJson(join(base, "facts", "harness-generation.json"), {
         status: "ai-reviewed",
         generatedAt: new Date().toISOString(),
@@ -347,6 +356,16 @@ export default defineCommand({
       });
     } else {
       progress.step("Rendering the deterministic instruction baseline");
+      await writeJson(join(base, "facts", "features.json"), {
+        schemaVersion: 1,
+        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+        features: [],
+      });
+      await writeJson(join(base, "facts", "harness-generation.json"), {
+        status: "deterministic",
+        generatedAt: new Date().toISOString(),
+        activatedGates: [],
+      });
     }
     let qualityFacts = await readFacts(root);
     if (!qualityFacts.referencePack) {
@@ -357,6 +376,14 @@ export default defineCommand({
       });
       qualityFacts = await readFacts(root);
     }
+    if (qualityFacts.structure) qualityFacts.knowledgeGraph = createKnowledgeArtifacts({
+      structure: qualityFacts.structure,
+      features: qualityFacts.featurePack ?? defaultFeaturePack(qualityFacts.structure.generatedAt),
+      references: qualityFacts.referencePack,
+      criticalPaths: qualityFacts.criticalPaths,
+      overrides: qualityFacts.featureOverrides ?? defaultFeatureOverrides(),
+      referenceProvenance: config.analysis.aiFallback ? "ai-reviewed" : "deterministic",
+    }).graph;
     const quality = assessHarnessQuality(qualityFacts, analysis.documentationConflicts ?? [], renderAgentsMd(qualityFacts));
     await writeJson(join(base, "facts", "quality.json"), quality);
     progress.step("Generating instructions and governance integrations");

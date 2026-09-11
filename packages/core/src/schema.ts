@@ -171,12 +171,38 @@ export const HarnessQualitySchema = z.object({
   schemaVersion: z.literal(1),
   generatedAt: z.string().datetime(),
   score: z.number().int().min(0).max(100),
+  grade: z.enum(["excellent", "strong", "developing", "weak", "critical"]).default("critical"),
+  confidence: z.number().int().min(0).max(100).default(0),
   checks: z.array(z.object({
     id: z.string().min(1),
     passed: z.boolean(),
     points: z.number().int().nonnegative(),
+    earned: z.number().min(0).optional(),
+    dimension: z.enum(["evidence", "navigation", "operations", "documentation", "governance"]).optional(),
     message: z.string().min(1),
   })),
+  dimensions: z.array(z.object({
+    id: z.enum(["evidence", "navigation", "operations", "documentation", "governance"]),
+    label: z.string().min(1),
+    score: z.number().int().min(0).max(100),
+    earned: z.number().min(0),
+    maxPoints: z.number().positive(),
+    summary: z.string().min(1),
+  })).default([]),
+  metrics: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    value: z.number().nonnegative(),
+    target: z.number().positive(),
+    percentage: z.number().int().min(0).max(100),
+    detail: z.string().min(1),
+  })).default([]),
+  findings: z.array(z.object({
+    severity: z.enum(["critical", "high", "medium", "low"]),
+    dimension: z.enum(["evidence", "navigation", "operations", "documentation", "governance"]),
+    message: z.string().min(1),
+    action: z.string().min(1),
+  })).default([]),
 });
 
 export const HarnessGenerationSchema = z.object({
@@ -191,6 +217,140 @@ export type ReferencePack = z.infer<typeof ReferencePackSchema>;
 export type DocumentationConflict = z.infer<typeof DocumentationConflictSchema>;
 export type HarnessQuality = z.infer<typeof HarnessQualitySchema>;
 export type HarnessGeneration = z.infer<typeof HarnessGenerationSchema>;
+
+export const GraphCitationSchema = z.object({
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+  endLine: z.number().int().positive().optional(),
+  evidenceId: z.string().min(1).optional(),
+}).refine((citation) => citation.endLine === undefined || citation.endLine >= citation.line, {
+  message: "Citation endLine must not precede line.",
+  path: ["endLine"],
+});
+
+export const RepositoryStructureSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime(),
+  files: z.array(z.object({
+    path: z.string().min(1),
+    kind: z.enum(["source", "test"]),
+    module: z.string().min(1).optional(),
+  })),
+  imports: z.array(z.object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    line: z.number().int().positive(),
+    excerpt: z.string().min(1),
+  })),
+  documents: z.array(z.string().min(1)).default([]),
+});
+
+export const FeatureRelationSchema = z.object({
+  to: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  kind: z.enum(["depends-on", "related-to"]),
+  citations: z.array(GraphCitationSchema).min(1),
+});
+
+export const FeatureDefinitionSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+  kind: z.enum(["feature", "concern"]).default("feature"),
+  title: z.string().min(1).max(120),
+  summary: z.string().min(1).max(500),
+  scopes: z.array(z.string().min(1).max(500)).min(1).max(20),
+  responsibilities: z.array(z.string().min(1).max(500)).max(20).default([]),
+  invariants: z.array(z.string().min(1).max(500)).max(20).default([]),
+  validation: z.array(z.string().min(1).max(500)).max(20).default([]),
+  citations: z.array(GraphCitationSchema).default([]),
+  relationships: z.array(FeatureRelationSchema).default([]),
+});
+
+export const FeaturePackSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime(),
+  features: z.array(FeatureDefinitionSchema).max(20),
+});
+
+export const FeatureOverrideSchema = z.object({
+  slug: FeatureDefinitionSchema.shape.slug,
+  kind: z.enum(["feature", "concern"]).optional(),
+  title: z.string().min(1).max(120).optional(),
+  summary: z.string().min(1).max(500).optional(),
+  scopes: z.array(z.string().min(1).max(500)).min(1).max(20).optional(),
+  responsibilities: z.array(z.string().min(1).max(500)).max(20).optional(),
+  invariants: z.array(z.string().min(1).max(500)).max(20).optional(),
+  validation: z.array(z.string().min(1).max(500)).max(20).optional(),
+  citations: z.array(GraphCitationSchema).optional(),
+  relationships: z.array(FeatureRelationSchema).optional(),
+});
+
+export const FeatureOverridesSchema = z.object({
+  schemaVersion: z.literal(1),
+  features: z.array(FeatureOverrideSchema).default([]),
+  relationships: z.array(z.object({
+    from: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+    to: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
+    kind: z.enum(["depends-on", "related-to"]),
+  })).default([]),
+  excludedFeatures: z.array(z.string()).default([]),
+  excludedRelationships: z.array(z.string()).default([]),
+});
+
+export const KnowledgeNodeKindSchema = z.enum(["feature", "concern", "module", "file", "test", "document", "critical-path"]);
+export const KnowledgeEdgeKindSchema = z.enum(["contains", "imports", "implements", "depends-on", "verified-by", "documented-by", "protected-by", "related-to"]);
+export const KnowledgeGraphSchema = z.object({
+  schemaVersion: z.literal(1),
+  generatedAt: z.string().datetime(),
+  generation: z.enum(["deterministic", "ai-reviewed", "mixed"]),
+  nodes: z.array(z.object({
+    id: z.string().min(1),
+    kind: KnowledgeNodeKindSchema,
+    label: z.string().min(1),
+    summary: z.string().optional(),
+    path: z.string().optional(),
+    scope: z.string().optional(),
+    guide: z.string().optional(),
+    provenance: z.enum(["deterministic", "ai-reviewed", "maintainer"]),
+    citations: z.array(GraphCitationSchema),
+  })),
+  edges: z.array(z.object({
+    id: z.string().min(1),
+    from: z.string().min(1),
+    to: z.string().min(1),
+    kind: KnowledgeEdgeKindSchema,
+    provenance: z.enum(["deterministic", "ai-reviewed", "maintainer"]),
+    weight: z.number().int().positive().optional(),
+    citations: z.array(GraphCitationSchema),
+  })),
+  diagnostics: z.array(z.object({
+    severity: z.enum(["warning", "error"]),
+    code: z.string().min(1),
+    message: z.string().min(1),
+  })),
+});
+
+export type GraphCitation = z.infer<typeof GraphCitationSchema>;
+export type RepositoryStructure = z.infer<typeof RepositoryStructureSchema>;
+export type FeatureDefinition = z.infer<typeof FeatureDefinitionSchema>;
+export type FeatureOverride = z.infer<typeof FeatureOverrideSchema>;
+export type FeaturePack = z.infer<typeof FeaturePackSchema>;
+export type FeatureOverrides = z.infer<typeof FeatureOverridesSchema>;
+export type KnowledgeGraph = z.infer<typeof KnowledgeGraphSchema>;
+export type KnowledgeNode = KnowledgeGraph["nodes"][number];
+export type KnowledgeEdge = KnowledgeGraph["edges"][number];
+
+export const defaultFeatureOverrides = (): FeatureOverrides => ({
+  schemaVersion: 1,
+  features: [],
+  relationships: [],
+  excludedFeatures: [],
+  excludedRelationships: [],
+});
+
+export const defaultFeaturePack = (generatedAt = new Date().toISOString()): FeaturePack => ({
+  schemaVersion: 1,
+  generatedAt,
+  features: [],
+});
 
 export const DEFAULT_EXCLUDES = [
   "**/.git/**",

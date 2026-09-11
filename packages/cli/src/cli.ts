@@ -12,6 +12,7 @@ import hooks from "./commands/hooks.js";
 import targets from "./commands/targets.js";
 import quality from "./commands/quality.js";
 import refresh from "./commands/refresh.js";
+import feature from "./commands/feature.js";
 import { HARNESSME_VERSION } from "@harnessme/core";
 import { dashboard } from "./dashboard.js";
 
@@ -35,6 +36,7 @@ const main = defineCommand({
     hooks,
     quality,
     refresh,
+    feature,
   },
   run: async () => {
     if (process.argv.length <= 2) await dashboard();

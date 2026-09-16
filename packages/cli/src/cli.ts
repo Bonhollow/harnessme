@@ -15,6 +15,7 @@ import refresh from "./commands/refresh.js";
 import feature from "./commands/feature.js";
 import generation from "./commands/generation.js";
 import context from "./commands/context.js";
+import mcp from "./commands/mcp.js";
 import { HARNESSME_VERSION } from "@harnessme/core";
 import { dashboard } from "./dashboard.js";
 
@@ -41,6 +42,7 @@ const main = defineCommand({
     feature,
     generation,
     context,
+    mcp,
   },
   run: async () => {
     if (process.argv.length <= 2) await dashboard();

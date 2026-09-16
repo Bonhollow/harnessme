@@ -51,6 +51,7 @@
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "@intellectronica/ruler": "0.3.44",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@opentui/core": "0.5.11",
     "@vscode/tree-sitter-wasm": "0.3.1",
     "citty": "0.2.2",
@@ -75,5 +76,6 @@
     "@opentui/core": {
       "web-tree-sitter": "0.27.0"
     }
-  }
+  },
+  "private": true
 }

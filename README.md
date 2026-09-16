@@ -60,6 +60,7 @@ harnessme generation list  # inspect local generated-document snapshots
 harnessme check --ci       # fail CI when repository facts have drifted
 harnessme feature list     # inspect semantic features in the committed graph
 harnessme context src/api/auth.ts  # assemble bounded pre-edit context for one file
+harnessme mcp                      # serve repository context to MCP-capable agents over stdio
 ```
 
 The complete command and critical-change workflow reference is available further down this README.
@@ -188,6 +189,12 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme feature unlink <from> <to>` | Remove or exclude a feature relationship. | `--kind depends-on\|related-to`. |
 
 `--provider` and `--review-provider` select inference runtimes. `--targets` selects generated instruction formats; the two settings are intentionally independent. The HTTP provider requires `--ai-endpoint` and `--model`; HTTP review requires `--review-ai-endpoint` and `--review-model`.
+
+### MCP server
+
+Run `harnessme mcp --root <repository>` to expose the initialized repository through the local stdio [Model Context Protocol](https://modelcontextprotocol.io/). Configure an MCP-capable client with `harnessme` as the command and `mcp --root <repository>` as its arguments.
+
+The server provides read-only `harnessme_quality`, `harnessme_change_context`, `harnessme_critical_paths`, `harnessme_feature_graph`, and `harnessme_validation_plan` tools. `harnessme_draft_critical_record`, `harnessme_add_directive`, and `harnessme_refresh` write managed artifacts only when their explicit confirmation parameter is `true`; drafting never approves a critical change.
 
 Generation snapshots are local, Git-ignored, capped at 20, and contain only wholly generated documents. Rollback preserves the current pending-update section and never replaces merged maintainer configuration such as CODEOWNERS, Lefthook, or provider settings.
 

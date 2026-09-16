@@ -155,6 +155,27 @@ describe("CLI", () => {
     await expect(access(join(root, ".harnessme"))).rejects.toMatchObject({ code: "ENOENT" });
   }, 30_000);
 
+  it("serves repository context and guarded operations through MCP stdio", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-mcp-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "mcp-fixture", scripts: { test: "node --test" } }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const protocol = [
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } } }),
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+      JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "harnessme_add_directive", arguments: { text: "MCP integration test directive.", confirm: true } } }),
+    ].join("\n");
+    const served = await execWithInput(process.execPath, [cli, "mcp", "--root", root], `${protocol}\n`);
+
+    expect(served.code).toBe(0);
+    expect(() => served.stdout.trim().split("\n").map((line) => JSON.parse(line))).not.toThrow();
+    expect(served.stdout).toContain('"name":"harnessme_change_context"');
+    expect(served.stdout).toContain('"name":"harnessme_draft_critical_record"');
+    expect(served.stdout).toContain('"name":"harnessme_add_directive"');
+    expect(served.stdout).toContain('"name":"harnessme_refresh"');
+    expect(await readFile(join(root, ".harnessme", "facts", "directives.md"), "utf8")).toContain("MCP integration test directive.");
+  }, 30_000);
+
   it("does not render a deterministic harness when AI authorship remains invalid", async () => {
     const invalidMarkdown = "# Repository instructions\n\nThis deliberately omits every required operating section so validation must reject it. ".repeat(3);
     const server = createServer((request, response) => {

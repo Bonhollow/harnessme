@@ -62,7 +62,7 @@ Use this process only after the developer explicitly confirms an edit to a prote
 3. Create the record with \`harnessme critical draft <path> --summary "<intent>"\` before editing.
 4. Document behavior impact, compatibility risk, validation performed, and rollback notes in the record.
 5. Stage the changed file and obtain approval bound to its exact staged content with \`harnessme critical approve <record> --approver <handle>\`.
-6. Ship the approved record and \`.harnessme/CRITICAL.md\` with the code.
+6. Ship the approved record, \`.harnessme/CRITICAL.md\`, and \`.harnessme/critical.json\` with the code.
 
 ## Active protected paths
 

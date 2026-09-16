@@ -109,7 +109,7 @@ describe("CLI", () => {
 
     const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic", "--details", "The API must remain compatible with external evaluators."]);
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(refreshed.stdout).toContain("Refreshed 12 managed artifact(s)");
+    expect(refreshed.stdout).toContain("Refreshed 13 managed artifact(s)");
     expect(JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8"))).toEqual(expect.objectContaining({ schemaVersion: 1 }));
     expect(await readFile(join(root, ".harnessme", "FEATURES.md"), "utf8")).toContain("# Feature navigation");
     await expect(access(join(root, ".harnessme", "graph.html"))).rejects.toThrow();
@@ -216,6 +216,25 @@ describe("CLI", () => {
     expect(await readFile(join(root, "lefthook.yml"), "utf8")).toContain("harnessme:");
   }, 30_000);
 
+  it("optionally generates and merges PR-Agent configuration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-qodo-target-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "qodo-target-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(root, ".pr_agent.toml"), "[config]\npublish_output = true\n\n[pr_reviewer]\nrequire_score_review = true\n");
+
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "pr-agent"]);
+    const qodoConfig = await readFile(join(root, ".pr_agent.toml"), "utf8");
+
+    expect(initialized.stdout).toContain("Initialized HarnessME with targets: pr-agent");
+    expect(qodoConfig).toContain("# HarnessME-managed PR-Agent review instructions.");
+    expect(qodoConfig).toContain("[config]");
+    expect(qodoConfig).toContain("publish_output = true");
+    expect(qodoConfig).toContain("[pr_reviewer]");
+    expect(qodoConfig).toContain("require_score_review = true");
+    expect(qodoConfig).toContain("extra_instructions");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Repository instructions");
+  }, 30_000);
+
   it.each([
     ["a malformed document", "pre-commit: ["],
     ["a scalar document", "disabled\n"],
@@ -285,6 +304,91 @@ const value = schema.includes("harnessme_facts")
     })).rejects.toThrow();
     expect(await readFile(join(root, ".harnessme", "facts", "AGENTS.authored.md"), "utf8")).toBe(authoredBeforeFailedRefresh);
     expect(await readFile(join(root, ".harnessme", "facts", "stack.yaml"), "utf8")).toBe(stackBeforeFailedRefresh);
+  }, 30_000);
+
+  it.skipIf(process.platform === "win32")("initializes with Claude Code and writes its native integration", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-claude-runtime-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const fakeClaude = join(bin, "claude");
+    const response = JSON.stringify({
+      markdown: authoredHarness("Claude fixture runtime.", undefined, "app.ts"),
+      gates: [], references: [], features: [], comparison: "Validated Claude fixture output.",
+    });
+    await writeFile(fakeClaude, `#!/usr/bin/env node
+const fs = require("node:fs");
+if (process.argv.includes("--version")) { console.log("claude-test"); process.exit(0); }
+fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
+const schema = JSON.parse(process.argv[process.argv.indexOf("--json-schema") + 1]);
+const value = schema.properties.facts
+  ? { facts: [{ id: "fixture-fact", kind: "language", language: "TypeScript", category: "tooling", statement: "TypeScript source is present.", path: "app.ts", line: 1, excerpt: "export const value" }] }
+  : schema.properties.approvedIds
+    ? { approvedIds: ["fixture-fact"] }
+    : JSON.parse(${JSON.stringify(response)});
+process.stdin.resume();
+process.stdin.on("end", () => console.log(JSON.stringify({ structured_output: value })));
+`);
+    await chmod(fakeClaude, 0o755);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "claude-runtime-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    const argsLog = join(root, "claude-args.log");
+
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "claude-code", "--targets", "claude-code"], {
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, HARNESSME_TEST_ARGS: argsLog },
+    });
+
+    expect(initialized.stdout).toContain("✓ AI-assisted mode: claude-code / provider default");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Claude fixture runtime");
+    expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
+    expect(await readFile(join(root, ".claude", "settings.json"), "utf8")).toContain("critical-gate");
+    const calls = await readFile(argsLog, "utf8");
+    expect(calls).toContain("--output-format");
+    expect(calls).toContain("--json-schema");
+    expect(calls).toContain("--permission-mode");
+    expect(calls).toContain("plan");
+  }, 30_000);
+
+  it.skipIf(process.platform === "win32")("initializes with Cursor's non-interactive agent protocol", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-cursor-runtime-"));
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const fakeCursor = join(bin, "cursor-agent");
+    const response = JSON.stringify({
+      markdown: authoredHarness("Cursor fixture runtime.", undefined, "app.ts"),
+      gates: [], references: [], features: [], comparison: "Validated Cursor fixture output.",
+    });
+    await writeFile(fakeCursor, `#!/usr/bin/env node
+const fs = require("node:fs");
+if (process.argv.includes("--version")) { console.log("cursor-test"); process.exit(0); }
+fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
+const input = fs.readFileSync("input.txt", "utf8");
+const schema = JSON.parse(input.slice(input.indexOf("OUTPUT JSON SCHEMA\\n") + "OUTPUT JSON SCHEMA\\n".length));
+const value = schema.properties.facts
+  ? { facts: [{ id: "fixture-fact", kind: "language", language: "TypeScript", category: "tooling", statement: "TypeScript source is present.", path: "app.ts", line: 1, excerpt: "export const value" }] }
+  : schema.properties.approvedIds
+    ? { approvedIds: ["fixture-fact"] }
+    : JSON.parse(${JSON.stringify(response)});
+console.log(JSON.stringify({ result: JSON.stringify(value) }));
+`);
+    await chmod(fakeCursor, 0o755);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "cursor-runtime-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    const argsLog = join(root, "cursor-args.log");
+
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "cursor", "--targets", "cursor"], {
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, HARNESSME_TEST_ARGS: argsLog },
+    });
+
+    expect(initialized.stdout).toContain("✓ AI-assisted mode: cursor / provider default");
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Cursor fixture runtime");
+    await expect(access(join(root, "CLAUDE.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    const calls = await readFile(argsLog, "utf8");
+    expect(calls).toContain("--print");
+    expect(calls).toContain("--mode");
+    expect(calls).toContain("ask");
+    expect(calls).toContain("--output-format");
+    expect(calls).toContain("--trust");
+    expect(calls).toContain("--workspace");
   }, 30_000);
 
   it("previews model inputs without writing and honors all privacy exclusions", async () => {
@@ -500,6 +604,10 @@ const value = schema.includes("harnessme_facts")
     await exec("git", ["add", "package.json", "payment.ts"], { cwd: root });
     await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], { cwd: root });
     await exec(process.execPath, [cli, "init", "--root", root, "--deterministic"]);
+    const initialCritical = JSON.parse(await readFile(join(root, ".harnessme", "critical.json"), "utf8")) as { rollback: { recordRequired: boolean; steps: string[] } };
+    expect(initialCritical.rollback.recordRequired).toBe(true);
+    expect(initialCritical.rollback.steps).toHaveLength(5);
+    expect(await readFile(join(root, ".harnessme", "CRITICAL.md"), "utf8")).toContain("## Rollback procedure");
     await exec(process.execPath, [cli, "hooks", "install", "--root", root]);
     expect((await exec(process.execPath, [cli, "hooks", "status", "--root", root])).stdout).toContain("is installed");
     await exec(process.execPath, [cli, "critical", "add", "payment.ts", "--reason", "money movement", "--approvers", "owner", "--root", root]);
@@ -513,7 +621,9 @@ const value = schema.includes("harnessme_facts")
     await writeFile(join(root, "payment.ts"), "export const amount = 2;\n");
     await exec("git", ["add", "payment.ts"], { cwd: root });
     await exec(process.execPath, [cli, "critical", "approve", record!, "--approver", "owner", "--root", root]);
-    await exec("git", ["add", `.harnessme/critical-log/${record}`, ".harnessme/CRITICAL.md"], { cwd: root });
+    const approvedCritical = JSON.parse(await readFile(join(root, ".harnessme", "critical.json"), "utf8")) as { records: Array<{ file: string; status: string }> };
+    expect(approvedCritical.records).toEqual(expect.arrayContaining([expect.objectContaining({ file: record, status: "approved" })]));
+    await exec("git", ["add", `.harnessme/critical-log/${record}`, ".harnessme/CRITICAL.md", ".harnessme/critical.json"], { cwd: root });
     const passed = await exec(process.execPath, [cli, "critical-gate", "--root", root]);
     expect(passed.stdout).toContain("Critical gate passed");
 
@@ -528,7 +638,7 @@ const value = schema.includes("harnessme_facts")
     const deletionRecord = deletionDraft.stdout.match(/critical-log\/([^\s]+\.md)/u)?.[1];
     await exec("git", ["rm", "payment.ts"], { cwd: root });
     await exec(process.execPath, [cli, "critical", "approve", deletionRecord!, "--approver", "owner", "--root", root]);
-    await exec("git", ["add", `.harnessme/critical-log/${deletionRecord}`, ".harnessme/CRITICAL.md"], { cwd: root });
+    await exec("git", ["add", `.harnessme/critical-log/${deletionRecord}`, ".harnessme/CRITICAL.md", ".harnessme/critical.json"], { cwd: root });
     const deletionPassed = await exec(process.execPath, [cli, "critical-gate", "--root", root]);
     expect(deletionPassed.stdout).toContain("Critical gate passed");
   }, 30_000);

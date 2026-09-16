@@ -1,7 +1,7 @@
 export interface Provider {
   id: string;
   label: string;
-  rulerId: string;
+  rulerId?: string;
   nativeArtifact: string;
 }
 
@@ -18,6 +18,7 @@ export const providers: Provider[] = [
   { id: "aider", label: "Aider", rulerId: "aider", nativeArtifact: ".aider.conf.yml" },
   { id: "zed", label: "Zed", rulerId: "zed", nativeArtifact: "AGENTS.md" },
   { id: "roo", label: "Roo Code", rulerId: "roo", nativeArtifact: "AGENTS.md" },
+  { id: "pr-agent", label: "PR-Agent", nativeArtifact: ".pr_agent.toml" },
 ];
 
 export function resolveProviders(values: string[]): Provider[] {

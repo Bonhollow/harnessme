@@ -11,6 +11,7 @@ import {
   readCriticalPaths,
   readText,
   stagedChangeId,
+  writeCriticalManifest,
   writeYaml,
 } from "@harnessme/core";
 import { createProgress, info } from "../output.js";
@@ -181,7 +182,8 @@ export const approve = defineCommand({
     if (!index.includes(String(document.data["change-id"]))) {
       await atomicWrite(indexPath, `${index.trimEnd()}\n${row}\n`);
     }
-    info(`Approved ${file} for staged content ${document.data["change-id"]}. Stage this record and .harnessme/CRITICAL.md with the code.`);
+    await writeCriticalManifest(root, await readCriticalPaths(root));
+    info(`Approved ${file} for staged content ${document.data["change-id"]}. Stage this record, .harnessme/CRITICAL.md, and .harnessme/critical.json with the code.`);
   },
 });
 

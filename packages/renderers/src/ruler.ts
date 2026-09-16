@@ -24,7 +24,7 @@ export async function applyRuler(root: string, selected: Provider[]): Promise<vo
   const ruler = require("@intellectronica/ruler") as { applyAllAgentConfigs: ApplyRuler };
   await ruler.applyAllAgentConfigs(
     root,
-    selected.map((provider) => provider.rulerId),
+    selected.flatMap((provider) => provider.rulerId ? [provider.rulerId] : []),
     undefined, // configPath
     false, // MCP propagation
     "merge",

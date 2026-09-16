@@ -52,6 +52,7 @@ Use commands when scripting, running CI, or when you already know the operation 
 
 ```bash
 harnessme init             # create a harness non-interactively or with prompts
+harnessme init --targets codex,pr-agent  # generate selected formats plus PR-Agent's .pr_agent.toml
 harnessme refresh          # update it after repository changes
 harnessme quality          # report quality dimensions and next best action
 harnessme sync --preview   # preview generated-document changes without writing
@@ -67,8 +68,8 @@ The complete command and critical-change workflow reference is available further
 
 - A concise root `AGENTS.md` that directs agents before they edit.
 - Nested module guides that automatically combine scoped Markdown guidance with graph-derived owners, dependencies, tests, and exact validation.
-- `.harnessme/CRITICAL.md` and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
-- Provider files for Codex, Claude Code, Cursor, and other selected agent formats.
+- `.harnessme/CRITICAL.md`, its machine-readable `.harnessme/critical.json` companion, rollback guidance, and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
+- Provider files for Codex, Claude Code, Cursor, PR-Agent, and other selected agent formats.
 - A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, context-delivery coverage, dependency density, test linkage, guide depth, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
 - A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and terminal explorer with structured and force-directed views.
 
@@ -95,7 +96,7 @@ When `harnessme init` runs, it:
 8. Builds `.harnessme/knowledge-graph.json`, `.harnessme/FEATURES.md`, and focused feature guides. Deterministic runs map modules, files, tests, imports, documentation, and critical paths; reviewed AI runs add evidence-backed feature meaning. Maintainer overrides always win.
 9. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
 10. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, feature navigation, scoped references, and documentation consistency.
-11. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
+11. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, `.harnessme/critical.json`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
 
 Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. Application source files are analyzed but not rewritten.
 
@@ -217,7 +218,7 @@ harnessme critical add "src/payments/**" --reason "money movement" --approvers "
 harnessme critical draft "src/payments/refund.ts" --summary "support partial refunds"
 # A listed human reviewer reviews the record and staged code, then:
 harnessme critical approve <record.md> --approver alice
-git add .harnessme/critical-log/<record.md> .harnessme/CRITICAL.md
+git add .harnessme/critical-log/<record.md> .harnessme/CRITICAL.md .harnessme/critical.json
 ```
 
 In deterministic-only mode, heuristic paths begin as `proposed`. Review them first, then activate an accepted rule. In AI mode, the final comparison may activate evidence-backed core paths automatically and records them with source `ai-reviewed`:

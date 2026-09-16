@@ -1,5 +1,6 @@
 import { mkdir, readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import * as toml from "@iarna/toml";
 import {
   atomicWrite,
   exists,
@@ -7,6 +8,7 @@ import {
   readText,
   writeYaml,
   writeJson,
+  writeCriticalManifest,
   createKnowledgeArtifacts,
   defaultFeatureOverrides,
   defaultFeaturePack,
@@ -22,6 +24,42 @@ import { captureGeneration } from "./generation-history.js";
 export interface SyncResult {
   files: string[];
   targets: string[];
+}
+
+function prAgentInstructions(): string {
+  return [
+    "Review changes against the repository instructions in AGENTS.md.",
+    "Prioritize regressions in public contracts, security, persistence, deployment, and shared-core behavior; base findings on the pull request diff and concrete repository evidence, not speculative style concerns.",
+    "Apply the active critical-path policy in AGENTS.md and .harnessme/CRITICAL.md. For a changed critical path, verify that its approved record, CRITICAL.md, and critical.json ship with the change; flag a missing or mismatched governance artifact as a high-confidence finding.",
+  ].map((instruction) => `- ${instruction}`).join("\n");
+}
+
+async function renderPrAgentConfig(root: string): Promise<string> {
+  const relative = ".pr_agent.toml";
+  const path = join(root, relative);
+  let settings = toml.parse("");
+  if (await exists(path)) {
+    try {
+      const parsed = toml.parse(await readText(path));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      settings = parsed;
+    } catch {
+      throw new Error(`Cannot merge HarnessME PR-Agent settings into invalid TOML: ${relative}`);
+    }
+  }
+  const reviewer = settings.pr_reviewer;
+  if (reviewer !== undefined && (!reviewer || typeof reviewer !== "object" || Array.isArray(reviewer))) {
+    throw new Error("Cannot merge HarnessME PR-Agent settings into invalid TOML table: [pr_reviewer]");
+  }
+  settings.pr_reviewer = { ...(reviewer as ReturnType<typeof toml.parse> | undefined), extra_instructions: prAgentInstructions() };
+  const header = [
+    "# HarnessME-managed PR-Agent review instructions.",
+    "# This optional integration is generated only when `harnessme init --targets codex,pr-agent` is selected.",
+    "# PR-Agent loads this repository-local configuration from the default branch.",
+    "",
+  ].join("\n");
+  await atomicWrite(path, `${header}${toml.stringify(settings)}`);
+  return relative;
 }
 
 export async function syncHarness(root: string, targetIds?: string[], options: { archive?: boolean } = {}): Promise<SyncResult> {
@@ -60,6 +98,8 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
   }
   await atomicWrite(agentsPath, content);
   const files = ["AGENTS.md", ".ruler/AGENTS.md", ".ruler/ruler.toml"];
+  await writeCriticalManifest(root, facts.criticalPaths);
+  files.push(".harnessme/critical.json");
   const references = referenceDocuments(facts);
 
   const structure = facts.structure ?? {
@@ -108,6 +148,9 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
       `${GENERATED_MARKER}\n@AGENTS.md\n`,
     );
     files.push("CLAUDE.md");
+  }
+  if (selected.some((provider) => provider.id === "pr-agent")) {
+    files.push(await renderPrAgentConfig(root));
   }
   if (selected.some((provider) => provider.id === "gemini-cli")) {
     const geminiPath = join(root, ".gemini", "settings.json");

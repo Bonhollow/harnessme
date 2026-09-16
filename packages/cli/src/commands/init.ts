@@ -101,7 +101,9 @@ export default defineCommand({
     if (await exists(base)) {
       throw new Error(`HarnessME is already initialized at ${root}. Use \`harnessme refresh\` to reanalyze it or \`harnessme sync\` to rerender stored facts.`);
     }
-    const selected = resolveProviders(providerValues(args.targets) ?? providers.map((provider) => provider.id));
+    // PR-Agent is a pull-request review integration, so opt in explicitly rather
+    // than adding its configuration to every initialized repository.
+    const selected = resolveProviders(providerValues(args.targets) ?? providers.filter((provider) => provider.id !== "pr-agent").map((provider) => provider.id));
     const config = defaultConfig(selected.map((provider) => provider.id));
     const councilSize = Number(args.councilSize);
     if (!Number.isInteger(councilSize) || councilSize < 1 || councilSize > 3) throw new Error("--council-size must be 1, 2, or 3.");
@@ -239,7 +241,7 @@ export default defineCommand({
     await atomicWrite(join(base, "facts", "directives.md"), directives);
     await atomicWrite(
       join(base, "CRITICAL.md"),
-      "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`.\n\n| Date | Risk | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|---|\n",
+      "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`; the machine-readable index is `.harnessme/critical.json`.\n\n## Rollback procedure\n\n1. Contain the impact and preserve the current critical record and deployment evidence before changing state.\n2. Identify the last known-good revision and all affected consumers, data, migrations, and operational dependencies.\n3. Create and obtain approval for a new critical-change record for the rollback; do not bypass the critical-path gate during an incident.\n4. Prefer reverting the deployed change or making a forward-compatible correction. Do not rewrite shared history or destroy data as a rollback shortcut.\n5. Validate restored behavior, compatibility, and data integrity with the repository's verified checks, then document the outcome in the rollback record.\n\n| Date | Risk | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|---|\n",
     );
 
     progress.step("Analyzing source, configuration, dependencies, and history");

@@ -50,7 +50,7 @@ export default defineCommand({
       if (failure.code === "approval-required") {
         process.stderr.write(`Create a record with: harnessme critical draft "${failure.path}" --summary "<summary>"\n`);
       } else if (failure.code !== "confirmation-required") {
-        process.stderr.write("Stage both the approved record and .harnessme/CRITICAL.md with the code change.\n");
+        process.stderr.write("Stage the approved record, .harnessme/CRITICAL.md, and .harnessme/critical.json with the code change.\n");
       }
     }
     process.exitCode = 2;

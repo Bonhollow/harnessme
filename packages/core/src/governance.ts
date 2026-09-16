@@ -6,7 +6,7 @@ import { minimatch } from "minimatch";
 import { z } from "zod";
 import { gitText, runGit } from "./git.js";
 import { CriticalPathsSchema, type CriticalPaths } from "./schema.js";
-import { posixPath, readText, readYaml } from "./files.js";
+import { posixPath, readText, readYaml, writeJson } from "./files.js";
 
 const CriticalRecordDataSchema = z.object({
   status: z.enum(["draft", "approved"]),
@@ -43,7 +43,7 @@ export interface CriticalMatch {
 export interface GateFailure {
   path: string;
   reason: string;
-  code: "confirmation-required" | "approval-required" | "record-not-in-change" | "index-not-in-change";
+  code: "confirmation-required" | "approval-required" | "record-not-in-change" | "index-not-in-change" | "manifest-not-in-change";
 }
 
 export type CriticalGateRequest =
@@ -55,6 +55,14 @@ export interface CriticalGateResult {
   critical: CriticalMatch[];
   failures: GateFailure[];
 }
+
+export const criticalRollbackSteps = [
+  "Contain the impact and preserve the current critical record and deployment evidence before changing state.",
+  "Identify the last known-good revision and all affected consumers, data, migrations, and operational dependencies.",
+  "Create and approve a new critical-change record for the rollback; do not bypass the critical-path gate during an incident.",
+  "Prefer a revert of the deployed change or a forward-compatible corrective change. Do not rewrite shared history or destroy data as a rollback shortcut.",
+  "Validate the restored behavior, compatibility, and data integrity with the repository's verified checks, then document the outcome in the rollback record.",
+] as const;
 
 export async function readCriticalPaths(root: string): Promise<CriticalPaths> {
   return readYaml(join(root, ".harnessme", "critical-paths.yaml"), CriticalPathsSchema);
@@ -143,6 +151,20 @@ export async function readCriticalRecords(root: string): Promise<CriticalRecord[
   return records;
 }
 
+/** Write the machine-readable counterpart to CRITICAL.md after each governance change. */
+export async function writeCriticalManifest(root: string, config: CriticalPaths): Promise<void> {
+  await writeJson(join(root, ".harnessme", "critical.json"), {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    rollback: {
+      recordRequired: true,
+      steps: criticalRollbackSteps,
+    },
+    paths: config.paths,
+    records: await readCriticalRecords(root),
+  });
+}
+
 export async function evaluateCriticalGate(root: string, request: CriticalGateRequest): Promise<CriticalGateResult> {
   const config = await readCriticalPaths(root);
   const checkedPaths = [...new Set(request.paths.map((path) => posixPath(path).replace(/^\.\//u, "")))];
@@ -162,6 +184,7 @@ export async function evaluateCriticalGate(root: string, request: CriticalGateRe
   const records = await readCriticalRecords(root);
   const included = new Set(request.includedPaths.map((path) => posixPath(path)));
   const indexPath = ".harnessme/CRITICAL.md";
+  const manifestPath = ".harnessme/critical.json";
   const index = await readText(join(root, indexPath));
   const failures: GateFailure[] = [];
   for (const match of critical) {
@@ -191,6 +214,9 @@ export async function evaluateCriticalGate(root: string, request: CriticalGateRe
     );
     if (!included.has(indexPath) || !indexed) {
       failures.push({ path: match.path, code: "index-not-in-change", reason: `${indexPath} must include this approved change` });
+    }
+    if (!included.has(manifestPath)) {
+      failures.push({ path: match.path, code: "manifest-not-in-change", reason: `${manifestPath} must ship with this approved change` });
     }
   }
   return { checkedPaths, critical, failures };

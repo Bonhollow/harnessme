@@ -51,7 +51,7 @@ async function runHarnessCommand(root: string, args: string[]): Promise<{ code: 
 }
 
 export function createHarnessMcpServer(root: string): McpServer {
-  const server = new McpServer({ name: "harnessme", version: "0.16.0" });
+  const server = new McpServer({ name: "harnessme", version: "0.17.0" });
 
   server.registerTool("harnessme_quality", {
     title: "HarnessME quality report",

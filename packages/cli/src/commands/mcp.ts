@@ -15,7 +15,9 @@ import {
   readFacts,
   readText,
   resolveChangeContext,
+  resolveRepositoryPreflight,
 } from "@harnessme/core";
+import { nonCodingClientInstructions } from "@harnessme/renderers";
 import { projectRoot } from "../project.js";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
@@ -51,7 +53,25 @@ async function runHarnessCommand(root: string, args: string[]): Promise<{ code: 
 }
 
 export function createHarnessMcpServer(root: string): McpServer {
-  const server = new McpServer({ name: "harnessme", version: "0.17.0" });
+  const server = new McpServer(
+    { name: "harnessme", version: "0.18.0" },
+    { instructions: nonCodingClientInstructions },
+  );
+
+  server.registerTool("harnessme_preflight", {
+    title: "HarnessME repository preflight",
+    description: "Required before any repository edit or Git/PR action. Returns root and nearest scoped instructions, critical-path approval requirements, change context, and validation guidance.",
+    inputSchema: {
+      paths: z.array(z.string().min(1)).min(1).max(20).describe("Every repository-relative path intended for the edit or affected by the Git/PR action."),
+      action: z.enum(["edit", "git", "pull-request"]).describe("The action that will follow this preflight."),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ paths, action }) => {
+    try {
+      const facts = await readFacts(root);
+      return result(await resolveRepositoryPreflight(root, facts, await readCriticalPaths(root), paths, action));
+    } catch (error) { return failure(error); }
+  });
 
   server.registerTool("harnessme_quality", {
     title: "HarnessME quality report",

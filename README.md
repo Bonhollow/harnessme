@@ -70,7 +70,7 @@ The complete command and critical-change workflow reference is available further
 - A concise root `AGENTS.md` that directs agents before they edit.
 - Nested module guides that automatically combine scoped Markdown guidance with graph-derived owners, dependencies, tests, and exact validation.
 - `.harnessme/CRITICAL.md`, its machine-readable `.harnessme/critical.json` companion, rollback guidance, and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
-- Provider files for Codex, Claude Code, Cursor, PR-Agent, and other selected agent formats.
+- Provider files for Codex, Claude Code, Claude Desktop, Cursor, PR-Agent, and other selected agent formats.
 - A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, context-delivery coverage, dependency density, test linkage, guide depth, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
 - A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and terminal explorer with structured and force-directed views.
 
@@ -194,7 +194,9 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 
 Run `harnessme mcp --root <repository>` to expose the initialized repository through the local stdio [Model Context Protocol](https://modelcontextprotocol.io/). Configure an MCP-capable client with `harnessme` as the command and `mcp --root <repository>` as its arguments.
 
-The server provides read-only `harnessme_quality`, `harnessme_change_context`, `harnessme_critical_paths`, `harnessme_feature_graph`, and `harnessme_validation_plan` tools. `harnessme_draft_critical_record`, `harnessme_add_directive`, and `harnessme_refresh` write managed artifacts only when their explicit confirmation parameter is `true`; drafting never approves a critical change.
+The server tells non-coding clients to call the read-only `harnessme_preflight` tool before edits and Git/PR actions. That tool returns the root and nearest scoped instructions, critical-path approval decision, graph context, and validation plan for the supplied paths. The server also provides `harnessme_quality`, `harnessme_change_context`, `harnessme_critical_paths`, `harnessme_feature_graph`, and `harnessme_validation_plan`. `harnessme_draft_critical_record`, `harnessme_add_directive`, and `harnessme_refresh` write managed artifacts only when their explicit confirmation parameter is `true`; drafting never approves a critical change.
+
+For Claude Desktop, select the `claude-desktop` target and follow the generated `.harnessme/integrations/claude-desktop.md`. It contains an MCP configuration template and copy-ready Project custom instructions. MCP instructions are advisory when a separate filesystem/git server owns writes; the generated Git hook and CI workflow remain the hard enforcement layer.
 
 Generation snapshots are local, Git-ignored, capped at 20, and contain only wholly generated documents. Rollback preserves the current pending-update section and never replaces merged maintainer configuration such as CODEOWNERS, Lefthook, or provider settings.
 

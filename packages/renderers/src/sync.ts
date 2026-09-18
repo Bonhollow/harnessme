@@ -20,6 +20,7 @@ import { renderGovernance } from "./governance.js";
 import { referenceDocuments } from "./reference-pack.js";
 import { syncGuidance } from "./guidance/sync.js";
 import { captureGeneration } from "./generation-history.js";
+import { renderClaudeDesktopInstructions } from "./non-coding-client.js";
 
 export interface SyncResult {
   files: string[];
@@ -148,6 +149,11 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
       `${GENERATED_MARKER}\n@AGENTS.md\n`,
     );
     files.push("CLAUDE.md");
+  }
+  if (selected.some((provider) => provider.id === "claude-desktop")) {
+    const desktopPath = ".harnessme/integrations/claude-desktop.md";
+    await atomicWrite(join(root, desktopPath), renderClaudeDesktopInstructions());
+    files.push(desktopPath);
   }
   if (selected.some((provider) => provider.id === "pr-agent")) {
     files.push(await renderPrAgentConfig(root));

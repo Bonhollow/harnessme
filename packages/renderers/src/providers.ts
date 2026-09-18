@@ -8,6 +8,7 @@ export interface Provider {
 export const providers: Provider[] = [
   { id: "codex", label: "OpenAI Codex", rulerId: "codex", nativeArtifact: "AGENTS.md" },
   { id: "claude-code", label: "Claude Code", rulerId: "claude", nativeArtifact: "CLAUDE.md" },
+  { id: "claude-desktop", label: "Claude Desktop", nativeArtifact: ".harnessme/integrations/claude-desktop.md" },
   { id: "cursor", label: "Cursor", rulerId: "cursor", nativeArtifact: "AGENTS.md" },
   { id: "opencode", label: "OpenCode", rulerId: "opencode", nativeArtifact: "AGENTS.md" },
   { id: "copilot", label: "GitHub Copilot", rulerId: "copilot", nativeArtifact: "AGENTS.md" },

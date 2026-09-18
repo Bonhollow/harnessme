@@ -5,3 +5,4 @@ export * from "./sync.js";
 export * from "./generation-history.js";
 export * from "./governance.js";
 export * from "./guidance/index.js";
+export * from "./non-coding-client.js";

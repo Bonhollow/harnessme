@@ -159,6 +159,87 @@ function operationalReferences() {
 }
 
 describe("AI harness authoring", () => {
+  it("accepts feature citations to discovered repository documentation", async () => {
+    const feature = {
+      slug: "documented-core-contract",
+      kind: "concern" as const,
+      title: "Documented core contract",
+      summary: "The core service follows the contract documented by the repository.",
+      scopes: ["src/**"],
+      responsibilities: ["Keep the core implementation aligned with its documented contract."],
+      invariants: ["Changes to the core contract remain documented."],
+      validation: ["Run npm test."],
+      citations: [{ path: "docs/CORE.md", line: 1 }],
+      relationships: [],
+    };
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.once("end", () => {
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const schema = payload.response_format?.json_schema?.name;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+          markdown: operationalHarnessMarkdown(),
+          gates: [],
+          references: operationalReferences(),
+          features: [feature],
+          ...(schema === "harnessme_agents_draft" ? {} : { comparison: "Kept the documented core contract." }),
+        }) } }] }));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server did not expose a port.");
+
+    const facts: FactsSnapshot = {
+      config: { schemaVersion: 1, targets: ["codex"], languages: ["TypeScript"], analysis: { exclude: [], maxFileBytes: 1000 }, distribution: { backend: "native" } },
+      conventions: { schemaVersion: 1, generatedAt: new Date().toISOString(), facts: [{ id: "service-boundary", category: "oop", statement: "Preserve the existing service boundary.", confidence: 0.9, evidence: ["core-source"] }] },
+      stack: { schemaVersion: 1, generatedAt: new Date().toISOString(), languages: [{ name: "TypeScript", files: 1, percentage: 100 }], packageManagers: ["npm"], frameworks: [], dependencies: [], topLevelModules: ["src"], documentationPaths: ["docs/CORE.md"] },
+      evidence: [
+        { id: "core-source", path: "src/core.ts", line: 1, kind: "ast", excerpt: "export class CoreService" },
+        { id: "core-doc", path: "docs/CORE.md", line: 1, kind: "ai", excerpt: "# Core contract" },
+      ],
+      architecture: "# Observed architecture\n\nThe src module contains the application core.\n",
+      directives: "# Project directives\n",
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+      changes: { schemaVersion: 1, changes: [] },
+    };
+    const analysis: AnalysisResult = {
+      conventions: facts.conventions,
+      stack: facts.stack,
+      evidence: facts.evidence,
+      architecture: facts.architecture,
+      hotspots: [],
+      warnings: [],
+      sourceFiles: ["src/core.ts"],
+      commands: ["npm test"],
+    };
+
+    const result = await authorHarnessWithAi({
+      facts,
+      analysis,
+      deterministicBaseline: operationalHarnessMarkdown(),
+      councilSize: 1,
+      inference: {
+        enabled: true,
+        provider: "http",
+        frameworks: [],
+        endpoint: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+        model: "test-model",
+        apiKeyEnv: "",
+        maxFiles: 20,
+        maxFileBytes: 65_536,
+        include: ["**/*"],
+        exclude: [],
+      },
+    });
+
+    expect(result.features).toEqual([feature]);
+  });
+
   it("repairs a reviewed document that omits a required section", async () => {
     let requests = 0;
     let draftSchema: Record<string, unknown> | undefined;

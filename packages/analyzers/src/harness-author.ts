@@ -134,7 +134,7 @@ export interface AuthoredHarnessResult {
 
 function validateFeatures(features: FeatureDefinition[], analysis: AnalysisResult): FeatureDefinition[] {
   const slugs = new Set<string>();
-  const paths = new Set(analysis.sourceFiles);
+  const paths = new Set([...analysis.sourceFiles, ...analysis.stack.documentationPaths ?? []]);
   const allowedCitations = new Set(analysis.evidence.map((item) => `${item.path}:${item.line}`));
   let contextPath: string | undefined;
   for (const line of contextLines(analysis.authorContext)) {

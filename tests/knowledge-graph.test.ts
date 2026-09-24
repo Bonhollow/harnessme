@@ -30,6 +30,35 @@ const features: FeaturePack = {
 };
 
 describe("knowledge graph", () => {
+  it("does not create a self-import edge from an import example", () => {
+    const withSelfImport: RepositoryStructure = {
+      ...structure,
+      imports: [...structure.imports, { from: "packages/api/auth.ts", to: "packages/api/auth.ts", line: 2, excerpt: "import { authenticate } from './auth'" }],
+    };
+    const graph = createKnowledgeArtifacts({
+      structure: withSelfImport,
+      features,
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+    }).graph;
+    expect(graph.edges.some((edge) => edge.kind === "imports" && edge.from === edge.to)).toBe(false);
+  });
+
+  it("links repository documents to the exact source files they cite", () => {
+    const artifacts = createKnowledgeArtifacts({
+      structure: {
+        ...structure,
+        documents: [".agents/corey-agent/references/auth.md"],
+        documentLinks: [{ document: ".agents/corey-agent/references/auth.md", path: "packages/api/auth.ts", line: 7 }],
+      },
+      features,
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+    });
+    expect(artifacts.graph.edges).toContainEqual(expect.objectContaining({
+      from: "file:packages/api/auth.ts", to: "document:.agents/corey-agent/references/auth.md", kind: "documented-by",
+      citations: [{ path: ".agents/corey-agent/references/auth.md", line: 7 }],
+    }));
+  });
+
   it("builds stable feature, implementation, test, documentation, and critical-path relationships", () => {
     const artifacts = createKnowledgeArtifacts({
       structure,
@@ -90,6 +119,21 @@ describe("knowledge graph", () => {
     expect(artifacts.graph.nodes).toContainEqual(expect.objectContaining({ id: "concern:authentication", provenance: "ai-reviewed" }));
     expect(artifacts.graph.edges).toContainEqual(expect.objectContaining({ from: "concern:authentication", to: "file:packages/api/auth.ts", kind: "implements" }));
     expect(artifacts.graph.edges).toContainEqual(expect.objectContaining({ from: "concern:authentication", to: "document:.harnessme/references/authentication.md", kind: "documented-by" }));
+  });
+
+  it("keeps a long authored reference usable when its graph summary exceeds the field limit", () => {
+    const longResponsibility = `Authenticate requests and preserve authorization context. ${"Inspect all upstream callers and downstream consumers before changing this behavior. ".repeat(9)}`;
+    const artifacts = createKnowledgeArtifacts({
+      structure,
+      features: { schemaVersion: 1, generatedAt, features: [] },
+      references: { schemaVersion: 1, generatedAt, documents: [{
+        slug: "authentication", title: "Authentication", scope: "packages/api/", scopes: ["packages/api/"], description: "Request identity.",
+        markdown: `# Authentication\n\n## Responsibilities\n\n- ${longResponsibility}\n\n## Invariants\n\n- Reject invalid credentials. Evidence: \`packages/api/auth.ts:1\`.\n\n## Validation\n\n- \`npm test\`\n`,
+      }] },
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+    });
+    expect(artifacts.graph.nodes).toContainEqual(expect.objectContaining({ id: "concern:authentication" }));
+    expect(artifacts.documents.find((item) => item.path.endsWith("authentication.md"))?.markdown).toContain("Authenticate requests and preserve authorization context.");
   });
 
   it("supports partial overrides without discarding generated fields", () => {

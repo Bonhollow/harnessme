@@ -1,4 +1,5 @@
 import type { FactsSnapshot, ReferenceDocument } from "@harnessme/core";
+import { isTestPath } from "../../../core/src/risk.js";
 import { referenceScopes } from "./scopes.js";
 
 export interface AgentPackDocument {
@@ -20,7 +21,7 @@ export function agentPackDocuments(facts: FactsSnapshot, references: ReferenceDo
     ? references.map((reference) => `- [${reference.title}](../references/${reference.slug}.md) — applies to ${referenceScopes(reference).map((scope) => `\`${scope}\``).join(", ")}.`).join("\n")
     : "- No focused reference guide was generated; use the root contract and local instructions.";
   const activeGates = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
-  const testPaths = (facts.stack.sourcePaths ?? []).filter((path) => /(?:^|\/)tests?(?:\/|$)/iu.test(path)).slice(0, 24);
+  const testPaths = (facts.stack.sourcePaths ?? []).filter(isTestPath).slice(0, 24);
   return [
     {
       path: ".harnessme/agent-pack/architecture.md",
@@ -63,6 +64,10 @@ Use this process only after the developer explicitly confirms an edit to a prote
 4. Document behavior impact, compatibility risk, validation performed, and rollback notes in the record.
 5. Stage the changed file and obtain approval bound to its exact staged content with \`harnessme critical approve <record> --approver <handle>\`.
 6. Ship the approved record, \`.harnessme/CRITICAL.md\`, and \`.harnessme/critical.json\` with the code.
+
+## Approval identity
+
+The \`--approver\` flag records a handle; it does not authenticate the person who supplied it. Require code owner review in the repository's GitHub branch rules before merging protected changes. A passing local or CI gate proves artifact consistency, not that a human reviewed the change.
 
 ## Active protected paths
 

@@ -13,7 +13,7 @@ const QualityHistorySchema = z.object({
   schemaVersion: z.literal(1),
   snapshots: z.array(z.object({
     capturedAt: z.string().datetime(),
-    trigger: z.enum(["init", "refresh", "remediation"]),
+    trigger: z.enum(["init", "refresh", "remediation", "gate-review"]),
     score: z.number().int().min(0).max(100),
     grade: z.enum(["excellent", "strong", "developing", "weak", "critical"]),
     confidence: z.number().int().min(0).max(100),

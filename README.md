@@ -42,7 +42,7 @@ Run `harnessme` from a repository root at any time. The dashboard is the default
 2. **Guided configuration** — choose a provider, model, Codex thinking level, review depth, and optional context without remembering flags.
 3. **Operation progress** — follow analysis, AI review, authored guidance, and integration steps in real time.
 4. **Quality intelligence, history, and remediation** — compare evidence, navigation, operations, documentation, and governance; inspect score trends across initialization, refreshes, and fixes; then select any failed check to see its recoverable points, projected score, recommended workflow, and verified result.
-5. **Critical Gate Manager** — activate, remove, or add explicit developer-confirmation gates for sensitive paths.
+5. **Critical Gate Manager** — activate, dismiss, remove, or add explicit developer-confirmation gates for sensitive paths. Dismissed proposals stay dismissed after refresh.
 6. **Knowledge Graph** — stay inside the terminal, press `G` to switch between structured and force-directed views, or press `P` on two nodes to explain their relationship path.
 7. **Generation safety** — preview generated-document diffs in an isolated workspace and restore one of the latest 20 local snapshots without rolling back source code or maintainer facts.
 
@@ -87,19 +87,19 @@ For model-assisted generation, install and sign in to at least one supported fra
 
 When `harnessme init` runs, it:
 
-1. Scans supported source files with bundled syntax-tree grammars and reads repository configuration and documentation.
+1. Scans supported source files with bundled syntax-tree grammars and reads repository configuration and documentation, including nested maintainer guides under `.agents/`.
 2. Reads package metadata, formatter and linter settings, type configuration, contribution documentation, and Git history.
 3. Detects the project purpose, repository structure, coding conventions, domain invariants, module ownership, validation commands, import hubs, frequently changed files, and documentation references that no longer match the implementation.
-4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation; local imports retain their source lines for graph evidence.
+4. Stores those findings in `.harnessme/facts/`. Every inferred convention includes a repository-relative file and line citation; local imports retain their source lines for graph evidence. Source and discovered-document hashes let `harnessme check` detect content changes even when the file list stays the same.
 5. Builds a deterministic `AGENTS.md` baseline and a bounded list of possible critical files and modules.
 6. Uses a four-stage model pipeline when AI is enabled: evidence extraction, independent claim verification, harness/reference authorship, and final baseline comparison. The author and reviewers receive the same bounded, redacted repository context; it is never stored. The review council validates every candidate and selects the strongest valid result based on concrete paths, symbols, citations, workflows, and scoped coverage. A focused repair pass runs only when local validation rejects every candidate.
 7. Authors a concise repository-specific root `AGENTS.md`, reviewed semantic feature definitions, a dedicated agent pack with architecture routing and a critical-change audit standard, and concern-focused executable change manuals. Each scoped guide identifies responsibilities, supported extension seams, invariants, coupled change impact, anti-patterns, workflows, validation, and maintenance triggers. HarnessME then places detailed nested `AGENTS.md` operating contracts in the applicable module directories. Cross-cutting guides can cover multiple concrete scopes. Obsolete managed module guides are removed on refresh.
-8. Builds `.harnessme/knowledge-graph.json`, `.harnessme/FEATURES.md`, and focused feature guides. Deterministic runs map modules, files, tests, imports, documentation, and critical paths; reviewed AI runs add evidence-backed feature meaning. Maintainer overrides always win.
-9. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other; only reviewer-approved paths from deterministic candidates can become active.
+8. Builds `.harnessme/knowledge-graph.json`, `.harnessme/FEATURES.md`, and focused feature guides. Deterministic runs map modules, files, tests, imports, documentation, and critical paths, including links from maintainer guides to the exact source files they cite. `harnessme context` uses those links to surface relevant guides for a changed file. Reviewed AI runs add evidence-backed feature meaning. Maintainer overrides always win. Refresh retains reviewed active gates. If a model draft omits a feature, refresh retains its existing guide while the source files in its scope and its cited evidence remain unchanged.
+9. Classifies proposed gates as security, persistence, public-contract, billing, deployment, shared-core, or other. Test files are excluded from automatic gate nominations. An imported maintainer rule that explicitly protects a named Python method becomes an active file gate only when its definition resolves to one source file; ambiguous names remain in the preserved directive. Other candidates stay proposed until reviewed.
 10. Scores the resulting harness for purpose, documentation, validation, evidence, operating rules, core boundaries, workflows, feature navigation, scoped references, and documentation consistency.
 11. Enforces safety language and managed placeholders locally, distributes the result to every selected framework, and generates `.harnessme/CRITICAL.md`, `.harnessme/critical.json`, CODEOWNERS, a Claude Code hook when selected, Lefthook configuration, and a GitHub Actions workflow.
 
-Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. Application source files are analyzed but not rewritten.
+Existing unmanaged `AGENTS.md` instructions are preserved as project directives instead of being discarded. An imported root contract is archived at `.harnessme/imported-AGENTS.md`, and unmanaged nested contracts remain in place. Application source files are analyzed but not rewritten.
 
 ### Framework model inference and fallback
 
@@ -157,7 +157,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | Command | Purpose | Options |
 | --- | --- | --- |
 | `harnessme init` | Analyze a repository and create the harness. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--thinking-level low|medium|high` (Codex), `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--details <text>` |
-| `harnessme scan` | Report analysis drift without writing. | No command-specific options. |
+| `harnessme scan` | Report source and documentation drift without writing. | No command-specific options. |
 | `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
 | `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>`, `--preview` |
 | `harnessme generation list` | List the latest local generated-document snapshots. | — |
@@ -165,13 +165,14 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme generation rollback [id]` | Restore a generated-document snapshot, defaulting to the previous generation. | `--preview` shows the rollback diff without writing. |
 | `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
 | `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
-| `harnessme check` | Fail if committed facts have drifted. | `--ci` |
+| `harnessme check` | Fail when stored facts, analyzed source or document contents, or generated guidance have drifted. | `--ci` |
 | `harnessme directive add <text>` | Add a maintainer-authored instruction. | — |
 | `harnessme directive list` | Print maintained directives. | — |
 | `harnessme critical add <glob>` | Register a risk-classified critical path. | `--reason <text>` and `--approvers <comma-list>` are required; `--risk security|persistence|public-contract|billing|deployment|shared-core|other` overrides automatic classification. |
 | `harnessme critical list` | List critical-path rules. | — |
-| `harnessme critical activate <glob>` | Activate a proposed critical path and regenerate governance files. | — |
-| `harnessme critical remove <glob>` | Remove an active or proposed critical-path rule and regenerate governance files. | — |
+| `harnessme critical activate <glob>` | Activate a proposed critical path and record the review decision. | `--reason <text>` is required. |
+| `harnessme critical remove <glob>` | Remove an active or proposed critical-path rule, record why, remember the dismissal across refreshes, and regenerate governance files. Imported maintainer directives protect their entry-method gates from removal. | `--reason <text>` is required. |
+| `harnessme critical review --file <plan.yaml>` | Validate and apply several proposed-gate decisions with one sync and quality snapshot. | Use `--dry-run` to preview; every decision needs a reason. |
 | `harnessme critical draft <path>` | Start a review record before changing a critical file. | `--summary <text>` is required. |
 | `harnessme critical approve <record.md>` | Bind an approved record to staged content. | `--approver <handle>` is required. |
 | `harnessme critical-gate` | Run the critical-path gate (normally invoked by hooks/CI). | `--path <file>` for edit checks, `--base <git-revision>` for CI, or `--hook` for Claude Code hook input. |
@@ -181,7 +182,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme targets list` | List generated integration targets. | — |
 | `harnessme feature list` | List features and concerns in the knowledge graph. | — |
 | `harnessme feature path <from> <to>` | Explain the shortest relationship path between node IDs, repository paths, or unique labels. | — |
-| `harnessme context <path>` | Combine the path's owning features, guides, dependencies, consumers, tests, gates, and validation. | `--changed` resolves all current Git changes; `--json` emits structured output. |
+| `harnessme context <path>` | Combine the path's owning features, directly citing maintainer guides, dependencies, consumers, tests, gates, and validation. | `--changed` resolves all current Git changes; `--json` emits structured output. |
 | `harnessme feature add <slug>` | Add a maintainer-owned feature definition. | `--title`, `--summary`, and comma-separated `--scopes` are required; `--kind feature\|concern` is optional. |
 | `harnessme feature edit <slug>` | Override generated feature metadata. | Optional `--title`, `--summary`, and `--scopes`. |
 | `harnessme feature remove <slug>` | Remove a manual feature or exclude a generated feature. | — |
@@ -234,11 +235,35 @@ In deterministic-only mode, heuristic paths begin as `proposed`. Review them fir
 
 ```bash
 harnessme critical list
-harnessme critical activate "src/core.ts"
-harnessme critical remove "src/core.ts"
+harnessme critical activate "src/core.ts" --reason "Shared contract used by multiple consumers"
+harnessme critical remove "src/core.ts" --reason "Reviewed path is not a protected contract"
 ```
 
-For registered paths, generated agent instructions require explicit developer confirmation before editing. Claude Code receives a native permission prompt; the Git hook and CI reject commits unless an approved record matches the exact staged/committed content and ships with the updated critical index. CODEOWNERS remains the authoritative team-review control on GitHub.
+For a larger queue, write a review plan and validate it before applying:
+
+```yaml
+schemaVersion: 1
+decisions:
+  - glob: src/core.ts
+    decision: activate
+    reason: Shared contract used by several consumers
+  - glob: src/fixture.ts
+    decision: dismiss
+    reason: Fixture constant has no protected behavior
+```
+
+```bash
+harnessme critical review --file gate-review.yaml --dry-run
+harnessme critical review --file gate-review.yaml
+```
+
+The batch command rejects duplicate, unknown, already active, or directive-protected dismissal entries before writing any decision.
+
+For registered paths, generated agent instructions require explicit developer confirmation before editing. Claude Code receives a native permission prompt; the Git hook and CI read the staged or committed record, index, manifest, and gate registry from the same Git snapshot. They reject changes unless an allowed approver's record matches the exact changed content and ships with the updated governance artifacts. The `--approver` flag records a claimed handle; it does not authenticate identity. Require code owner review in GitHub branch rules for human approval before merge. The generated CI gate runs for pull requests and direct pushes to `main` after the branch has a prior revision. Gates active in the baseline revision still govern code changed in the same commit that removes or weakens them. `harnessme check` verifies the generated CI gate; when `.github/workflows/harnessme.yml` is user-owned, HarnessME creates `.github/workflows/harnessme-generated.yml` beside it.
+
+Activation and dismissal decisions are recorded with a reason and timestamp in `.harnessme/critical-paths.yaml`; refresh preserves that review history. Gate changes also add a quality-history snapshot so score trends include reviewed governance changes.
+
+Gates derived from imported `AGENTS.md` entry-method restrictions remain active while those directives apply. `critical remove` rejects their removal, `check` reports a missing gate, and `refresh` restores one even if the registry was manually edited. Edit and commit gates also consult the stored directives, so a registry edit alone cannot permit a protected source change.
 
 </details>
 

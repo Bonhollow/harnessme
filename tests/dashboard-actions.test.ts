@@ -23,12 +23,15 @@ describe("dashboard command execution", () => {
     expect(output.join("")).toContain("✓ [1/1] Complete");
   });
 
-  it("builds a single gate plan that activates proposals and removes selected active gates", () => {
+  it("builds a gate plan that activates, removes, and dismisses distinct paths", () => {
     const plan = buildGatePlan([
       { glob: "src/auth.ts", status: "proposed" },
       { glob: "src/store.ts", status: "active" },
       { glob: "src/client.ts", status: "active" },
-    ], new Set(["src/auth.ts", "src/store.ts"]));
-    expect(plan).toEqual({ activate: ["src/auth.ts"], remove: ["src/store.ts"] });
+      { glob: "src/unused.ts", status: "proposed" },
+    ], new Set(["src/auth.ts", "src/store.ts"]), new Set(["src/unused.ts"]));
+    expect(plan).toEqual({ activate: ["src/auth.ts"], remove: ["src/store.ts"], dismiss: ["src/unused.ts"] });
+    expect(buildGatePlan([{ glob: "src/auth.ts", status: "proposed" }], new Set(["src/auth.ts"]), new Set(["src/auth.ts"]))
+      .activate).toEqual([]);
   });
 });

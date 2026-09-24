@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { FactsSnapshot } from "../packages/core/src/facts-store.js";
+import { ReferencePackSchema } from "../packages/core/src/schema.js";
 import { assessHarnessQuality } from "../packages/core/src/quality.js";
 import { planQualityRemediations } from "../packages/core/src/quality-remediation.js";
-import { classifyRisk } from "../packages/core/src/risk.js";
+import { classifyRisk, isTestPath } from "../packages/core/src/risk.js";
 import { criticalCandidates } from "../packages/analyzers/src/critical-candidates.js";
 import { analyzeDocumentation } from "../packages/analyzers/src/documentation.js";
 import { referenceDocuments } from "../packages/renderers/src/reference-pack.js";
@@ -74,6 +75,12 @@ function comprehensiveSnapshot(): FactsSnapshot {
 }
 
 describe("harness quality benchmark", () => {
+  it("counts a configured pre-commit run as independent static checks", () => {
+    const facts = snapshot();
+    facts.stack.validationCommands = ["uv run pytest", "uv run pre-commit run --all-files"];
+    expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "validation-depth", passed: true }));
+  });
+
   it("does not confuse generated operational prose with comprehensive quality", () => {
     const operational = snapshot("# Repository instructions\n\n## Before editing\n\nInspect `src/core.ts`.\n\n## Operating rules\n\nPreserve contracts.\n\n## Core boundaries\n\n`src/core.ts`\n\n## Change workflows\n\nEdit `src/core.ts` and update tests.\n");
     const operationalQuality = assessHarnessQuality(operational);
@@ -132,6 +139,13 @@ describe("harness quality benchmark", () => {
     expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "reference-depth", passed: false }));
   });
 
+  it("counts source line citations as grounded change workflows", () => {
+    const facts = comprehensiveSnapshot();
+    facts.authoredInstructions = facts.authoredInstructions?.replace(/`src\/core\.ts`/gu, "`src/core.ts:1`");
+    const quality = assessHarnessQuality(facts);
+    expect(quality.checks).toContainEqual(expect.objectContaining({ id: "workflow-depth", passed: true }));
+  });
+
   it("does not award feature-graph quality when the graph is absent", () => {
     const facts = snapshot("# Repository instructions\n\n## Before editing\n\nInspect `src/core.ts`.\n\n## Operating rules\n\nPreserve contracts.\n\n## Core boundaries\n\n`src/core.ts`\n\n## Change workflows\n\nEdit `src/core.ts` and update tests.\n");
     facts.knowledgeGraph = undefined;
@@ -147,6 +161,60 @@ describe("harness quality benchmark", () => {
     expect(result.conflicts).toEqual([expect.objectContaining({ document: "README.md", reference: "src/missing.ts" })]);
   });
 
+  it("discovers nested subsystem docs and checks their repository references", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-nested-docs-"));
+    await mkdir(join(root, "mcp_graph", "docs"), { recursive: true });
+    await mkdir(join(root, "other", "docs"), { recursive: true });
+    await mkdir(join(root, "mcp_graph", "core"), { recursive: true });
+    await writeFile(join(root, "mcp_graph", "docs", "CONTRACT.md"), "Inspect `mcp_graph/core/missing.py`.\n");
+    await writeFile(join(root, "mcp_graph", "docs", "AGENTS.md"), "Generated local agent instructions.\n");
+    await writeFile(join(root, "other", "docs", "IGNORED.md"), "Ignored.\n");
+    const result = await analyzeDocumentation(root, ["other/**"]);
+    expect(result.paths).toEqual(["mcp_graph/docs/CONTRACT.md"]);
+    expect(result.conflicts).toEqual([expect.objectContaining({
+      document: "mcp_graph/docs/CONTRACT.md", reference: "mcp_graph/core/missing.py",
+    })]);
+  });
+
+  it("indexes maintainer agent packs as canonical documentation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-maintainer-pack-"));
+    await mkdir(join(root, ".agents", "corey-agent", "references"), { recursive: true });
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "existing.ts"), "export class Existing {}\n");
+    await writeFile(join(root, ".agents", "corey-agent", "agent.md"), "Read task-relevant references.\n");
+    await writeFile(join(root, ".agents", "corey-agent", "references", "state.md"), "Inspect `src/existing.ts::Existing` and `src/missing.ts::Missing`.\n");
+    const result = await analyzeDocumentation(root, []);
+    expect(result.paths).toEqual([
+      ".agents/corey-agent/agent.md",
+      ".agents/corey-agent/references/state.md",
+    ]);
+    expect(result.conflicts).toEqual([expect.objectContaining({
+      document: ".agents/corey-agent/references/state.md", reference: "src/missing.ts",
+    })]);
+    expect(result.links).toContainEqual({
+      document: ".agents/corey-agent/references/state.md", path: "src/existing.ts", line: 1,
+    });
+  });
+
+  it("does not treat untracked local environment files as missing repository docs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-local-env-docs-"));
+    await mkdir(join(root, "service"));
+    await writeFile(join(root, "README.md"), "Create `service/.env.api.local` and inspect `service/missing.py`.\n");
+    const result = await analyzeDocumentation(root, []);
+    expect(result.conflicts).toEqual([expect.objectContaining({ reference: "service/missing.py" })]);
+  });
+
+  it("places scoped agent guidance beside a cited document, never under its filename", () => {
+    const facts = snapshot();
+    facts.stack.documentationPaths = ["mcp_graph/docs/CONVERSATION_API.md"];
+    const references = [{
+      slug: "conversation", title: "Conversation API", scope: "mcp_graph/docs/CONVERSATION_API.md",
+      description: "Conversation contract.", markdown: "# Conversation API\n\n## Responsibilities\n\nPreserve the public contract.\n",
+    }];
+    const directories = nestedAgentDocuments(facts, references).map((document) => document.directory);
+    expect(directories).toEqual(["mcp_graph/docs"]);
+  });
+
   it("classifies critical paths by operational risk", () => {
     expect(classifyRisk("src/auth/session.ts")).toBe("security");
     expect(classifyRisk("src/db/repository.ts")).toBe("persistence");
@@ -154,6 +222,23 @@ describe("harness quality benchmark", () => {
     expect(classifyRisk(".github/workflows/release.yml")).toBe("deployment");
     expect(classifyRisk("src/api/contract.ts")).toBe("public-contract");
     expect(classifyRisk("src/core/runtime.ts")).toBe("shared-core");
+    expect(classifyRisk("mcp_graph/api/core/graph/lanes/knowledge/nodes.py")).toBe("shared-core");
+    expect(classifyRisk("mcp_graph/api/core/model_runtime.py")).toBe("shared-core");
+    expect(classifyRisk("mcp_graph/api/core/graph/infra/checkpointer.py")).toBe("shared-core");
+    expect(classifyRisk("mcp_graph/mcp_layer/models/request_context.py")).toBe("other");
+    expect(classifyRisk("mcp_graph/api/database/repository/company.py")).toBe("persistence");
+    expect(classifyRisk("mcp_graph/api/conversation_routes/_chat.py")).toBe("public-contract");
+    expect(classifyRisk("mcp_graph/api/core/graph/lanes/knowledge/workflow_params.py")).toBe("shared-core");
+    expect(classifyRisk("mcp_graph/common/release_notes_validation.py")).toBe("shared-core");
+    expect(classifyRisk("scripts/deploy/release.sh")).toBe("deployment");
+  });
+
+  it("recognizes common test paths before nominating critical gates", () => {
+    for (const path of ["tests/core.py", "specs/core.ts", "src/test_core.py", "src/spec_core.ts", "src/conftest.py", "src/core_test.go", "src/core.spec.ts"]) {
+      expect(isTestPath(path)).toBe(true);
+    }
+    expect(isTestPath("src/core/runtime.py")).toBe(false);
+    expect(criticalCandidates(["src/test_auth.py", "src/core/security.py"]).map((candidate) => candidate.path)).toEqual(["src/core/security.py"]);
   });
 
   it("surfaces rejected AI authorship and produces review-only risk candidates", () => {
@@ -209,6 +294,7 @@ describe("harness quality benchmark", () => {
       expect.objectContaining({ title: "Dataset synchronization", scope: "src/coreval/api/**" }),
     ]));
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("## Anti-patterns");
+    expect(references.find((item) => item.title === "Persistence and idempotency")?.scopes).toEqual(["src/coreval/api/services/experiment_repository.py"]);
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("`src/coreval/api/services/token_provider.py`");
     expect(nestedAgentDocuments(facts)).toEqual(expect.arrayContaining([
       expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Graph-routed context") }),
@@ -228,5 +314,15 @@ describe("harness quality benchmark", () => {
       expect.objectContaining({ path: ".harnessme/agent-pack/critical-change-audit.md", markdown: expect.stringContaining("## Audit record standard") }),
       expect.objectContaining({ path: ".harnessme/agent-pack/testing-and-validation.md", markdown: expect.stringContaining("## Validation ladder") }),
     ]));
+  });
+
+  it("keeps all exact concern scopes valid when a repository has many owned files", () => {
+    const facts = snapshot();
+    facts.referencePack = undefined;
+    facts.stack.sourcePaths = Array.from({ length: 25 }, (_, index) => `src/domain/repository_${index}.py`);
+    const reference = referenceDocuments(facts).find((item) => item.title === "Persistence and idempotency");
+    expect(reference?.scopes).toHaveLength(25);
+    expect(reference?.markdown).toContain("13 additional scoped path(s) are indexed in the knowledge graph");
+    expect(() => ReferencePackSchema.parse({ schemaVersion: 1, generatedAt: facts.stack.generatedAt, documents: [reference] })).not.toThrow();
   });
 });

@@ -51,13 +51,17 @@ export function assessHarnessQuality(facts: FactsSnapshot, conflicts: Documentat
   const workflow = section(markdown, "Change workflows");
   const groundedPaths = [...knownPaths, ...facts.stack.topLevelModules.map((module) => `${module}/`)];
   const workflowItems = workflow.split(/\r?\n/u).filter((line) => /^\s*(?:[-*]|\d+\.)\s+/u.test(line)).length;
-  const workflowGrounded = groundedPaths.some((path) => workflow.includes(`\`${path}\``));
+  const workflowGrounded = [...workflow.matchAll(/`([^`]+)`/gu)].some((match) => {
+    const citedPath = match[1]?.replace(/:\d+(?:-\d+)?$/u, "").replace(/\/$/u, "");
+    return groundedPaths.some((path) => path.replace(/\/$/u, "") === citedPath);
+  });
   const concreteCore = /`[^`]+`/u.test(section(markdown, "Core boundaries")) && !/no (?:explicit|concrete) core boundary/iu.test(section(markdown, "Core boundaries"));
   const validationCommands = [...new Set(facts.stack.validationCommands ?? [])];
   const validationKinds = new Set(validationCommands.flatMap((command) => [
     /(?:test|pytest|vitest|jest|rspec|cargo test|go test)/iu.test(command) ? "test" : "",
     /(?:lint|eslint|ruff|flake8|clippy)/iu.test(command) ? "lint" : "",
     /(?:build|compile|tsc|cargo check)/iu.test(command) ? "build" : "",
+    /\bpre-commit\b/iu.test(command) ? "checks" : "",
   ].filter(Boolean)));
   const activeGates = facts.criticalPaths.paths.filter((item) => item.status === "active").length;
   const proposedGates = facts.criticalPaths.paths.filter((item) => item.status === "proposed").length;

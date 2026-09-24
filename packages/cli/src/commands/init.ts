@@ -5,6 +5,7 @@ import {
   atomicWrite,
   assessHarnessQuality,
   classifyRisk,
+  isTestPath,
   defaultConfig,
   defaultCriticalPaths,
   defaultVerifiedChanges,
@@ -27,6 +28,7 @@ import {
   analyzeProject,
   authorHarnessWithAi,
   criticalCandidates,
+  protectedEntryCandidates,
   discoverAvailableModels,
   previewAiInputs,
   resolveInferenceProvider,
@@ -260,9 +262,11 @@ export default defineCommand({
     if (!approvers.length) throw new Error("--critical-approvers must include at least one handle.");
     if (criticalPaths.heuristics.enabled) {
       for (const candidate of analysis.hotspots.filter((item) =>
-        item.changes >= criticalPaths.heuristics.minChanges
-        || item.fanIn >= criticalPaths.heuristics.minFanIn
-        || item.score >= criticalPaths.heuristics.minScore
+        !isTestPath(item.path) && (
+          item.changes >= criticalPaths.heuristics.minChanges
+          || item.fanIn >= criticalPaths.heuristics.minFanIn
+          || item.score >= criticalPaths.heuristics.minScore
+        )
       )) {
         criticalPaths.paths.push({
           glob: candidate.path,
@@ -286,6 +290,13 @@ export default defineCommand({
       }
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     }
+    for (const candidate of await protectedEntryCandidates(root, analysis.sourceFiles, directives)) {
+      const existing = criticalPaths.paths.find((entry) => entry.glob === candidate.path);
+      const rule = { glob: candidate.path, reason: candidate.reason, approvers, source: "explicit" as const, status: "active" as const, risk: candidate.risk };
+      if (existing) Object.assign(existing, rule);
+      else criticalPaths.paths.push(rule);
+    }
+    await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
     config.languages = analysis.stack.languages.map((language) => language.name);
     await writeYaml(join(base, "harnessme.yaml"), config);
     if (config.analysis.aiFallback) {
@@ -319,6 +330,7 @@ export default defineCommand({
       for (const gate of authored.gates) {
         const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
         if (existing) {
+          if (existing.source === "explicit") continue;
           existing.reason = gate.reason;
           existing.source = "ai-reviewed";
           existing.status = "active";
@@ -371,7 +383,7 @@ export default defineCommand({
       });
     }
     let qualityFacts = await readFacts(root);
-    if (!qualityFacts.referencePack) {
+    if (!qualityFacts.referencePack?.documents.length) {
       await writeJson(join(base, "facts", "references.json"), {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),

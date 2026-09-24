@@ -51,11 +51,11 @@ async function customGate(): Promise<GatePlan["add"] | undefined> {
   return approvers ? { glob, reason, approvers } : undefined;
 }
 
-function gateOption(gate: CriticalPath, selected: boolean): SelectOption {
-  const intent = gate.status === "proposed" ? "activate" : "remove";
+function gateOption(gate: CriticalPath, selected: boolean, dismissed: boolean): SelectOption {
+  const intent = dismissed ? "dismiss" : gate.status === "proposed" ? "activate" : "remove";
   return {
-    name: `${selected ? "☑" : "☐"} ${gate.glob}`,
-    description: `${gate.status} · ${gate.risk ?? "other"} · ${selected ? `will ${intent}` : gate.reason}`,
+    name: `${selected || dismissed ? "☑" : "☐"} ${gate.glob}`,
+    description: `${gate.status} · ${gate.risk ?? "other"} · ${selected || dismissed ? `will ${intent}` : gate.reason}`,
     value: gate.glob,
   };
 }
@@ -65,6 +65,7 @@ export async function manageGates(root: string): Promise<GatePlan | undefined> {
   const gates = facts.criticalPaths.paths.slice().sort((left, right) => left.status.localeCompare(right.status) || left.glob.localeCompare(right.glob));
   const renderer = await createCliRenderer({ exitOnCtrlC: false, clearOnShutdown: true });
   const selected = new Set<string>();
+  const dismissed = new Set<string>();
   const rootBox = new BoxRenderable(renderer, { flexDirection: "column", width: "100%", height: "100%", backgroundColor: COLORS.background });
   renderer.root.add(rootBox);
   const header = new BoxRenderable(renderer, { height: 3, backgroundColor: "#075985", paddingX: 2, flexDirection: "column" });
@@ -79,7 +80,7 @@ export async function manageGates(root: string): Promise<GatePlan | undefined> {
   body.add(details);
   const summary = addText(renderer, details, "No gates selected.", { fg: COLORS.muted });
   const selectedDetails = addText(renderer, details, "Choose a path with Enter or Space.", { fg: COLORS.text, wrapMode: "word" });
-  const options = (): SelectOption[] => gates.map((gate) => gateOption(gate, selected.has(gate.glob)));
+  const options = (): SelectOption[] => gates.map((gate) => gateOption(gate, selected.has(gate.glob), dismissed.has(gate.glob)));
   const select = new SelectRenderable(renderer, {
     options: options(), flexGrow: 1, focusedBackgroundColor: COLORS.panel, selectedBackgroundColor: COLORS.selected,
     selectedTextColor: "#ffffff", textColor: COLORS.text, descriptionColor: COLORS.muted, wrapSelection: true, showDescription: true,
@@ -87,14 +88,14 @@ export async function manageGates(root: string): Promise<GatePlan | undefined> {
   listBox.add(select);
   const footer = new BoxRenderable(renderer, { height: 1, paddingX: 2 });
   rootBox.add(footer);
-  addText(renderer, footer, "↑/↓ navigate  Enter/Space toggle  a all/none  s apply  n add gate  Esc/q back", { height: 1, fg: COLORS.muted });
+  addText(renderer, footer, "↑/↓ navigate  Enter/Space toggle  d dismiss proposal  s apply  n add gate  Esc/q back", { height: 1, fg: COLORS.muted });
   select.focus();
 
   const refresh = (): void => {
     select.options = options();
     const active = gates.filter((gate) => gate.status === "active" && selected.has(gate.glob)).length;
     const proposed = gates.filter((gate) => gate.status === "proposed" && selected.has(gate.glob)).length;
-    summary.content = selected.size ? `${proposed} proposed gate(s) will activate\n${active} active gate(s) will be removed` : "No gates selected. Add a custom gate or select existing paths.";
+    summary.content = selected.size || dismissed.size ? `${proposed} proposed gate(s) will activate\n${dismissed.size} proposal(s) will be dismissed\n${active} active gate(s) will be removed` : "No gates selected. Add a custom gate or select existing paths.";
     const current = select.getSelectedOption();
     const gate = gates.find((item) => item.glob === current?.value);
     selectedDetails.content = gate
@@ -106,7 +107,20 @@ export async function manageGates(root: string): Promise<GatePlan | undefined> {
     const current = select.getSelectedOption()?.value;
     if (typeof current !== "string") return;
     if (selected.has(current)) selected.delete(current);
-    else selected.add(current);
+    else {
+      dismissed.delete(current);
+      selected.add(current);
+    }
+    refresh();
+  };
+  const dismissCurrent = (): void => {
+    const current = select.getSelectedOption()?.value;
+    if (typeof current !== "string" || !gates.some((gate) => gate.glob === current && gate.status === "proposed")) return;
+    if (dismissed.has(current)) dismissed.delete(current);
+    else {
+      selected.delete(current);
+      dismissed.add(current);
+    }
     refresh();
   };
   refresh();
@@ -117,17 +131,30 @@ export async function manageGates(root: string): Promise<GatePlan | undefined> {
       done = true;
       renderer.destroy();
       if (kind === "cancel") return resolve(undefined);
-      if (kind === "add") return resolve({ activate: [], remove: [], add: await customGate() });
-      resolve(buildGatePlan(gates, selected));
+      if (kind === "add") return resolve({ activate: [], remove: [], dismiss: [], add: await customGate() });
+      const plan = buildGatePlan(gates, selected, dismissed);
+      const reasons: Record<string, string> = {};
+      for (const [decision, paths] of [["activate", plan.activate], ["remove", plan.remove], ["dismiss", plan.dismiss]] as const) {
+        for (const glob of paths) {
+          const reason = await textEntry(`Review ${decision}: ${glob}`, "Record the concrete reason for this gate decision (at least 8 characters).", "Reviewed against the owning contract and callers");
+          if (!reason || reason.length < 8) return resolve(undefined);
+          reasons[glob] = reason;
+        }
+      }
+      resolve({ ...plan, reasons });
     };
     select.on(SelectRenderableEvents.ITEM_SELECTED, () => toggleCurrent());
     select.on(SelectRenderableEvents.SELECTION_CHANGED, () => refresh());
     renderer.keyInput.on("keypress", (key) => {
       if (key.name === "escape" || key.name === "q" || (key.ctrl && key.name === "c")) void finish("cancel");
       else if (key.name === "space") toggleCurrent();
+      else if (key.name === "d") dismissCurrent();
       else if (key.name === "a") {
         if (selected.size === gates.length) selected.clear();
-        else gates.forEach((gate) => selected.add(gate.glob));
+        else {
+          dismissed.clear();
+          gates.forEach((gate) => selected.add(gate.glob));
+        }
         refresh();
       } else if (key.name === "s") void finish("apply");
       else if (key.name === "n") void finish("add");

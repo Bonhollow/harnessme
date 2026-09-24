@@ -1,8 +1,11 @@
+import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, dirname, extname, join } from "node:path";
 import fg from "fast-glob";
 import {
   posixPath,
+  isTestPath,
   type Convention,
   type Evidence,
   type Stack,
@@ -17,8 +20,9 @@ import { analyzeWithAiFallback } from "./ai-fallback.js";
 import { InferenceUnavailableError } from "./inference.js";
 import { analyzeDocumentation } from "./documentation.js";
 import { createImportResolver } from "./import-resolver.js";
+import { isPythonPackageMarker } from "./source-classification.js";
 
-const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,ini,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
+const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
 const languageByExtension: Record<string, string> = {
   ".bash": "Shell",
   ".c": "C",
@@ -30,7 +34,6 @@ const languageByExtension: Record<string, string> = {
   ".go": "Go",
   ".h": "C/C++ Header",
   ".hpp": "C++ Header",
-  ".ini": "INI",
   ".java": "Java",
   ".ts": "TypeScript",
   ".tsx": "TypeScript",
@@ -46,6 +49,12 @@ const languageByExtension: Record<string, string> = {
   ".sh": "Shell",
 };
 const supportedExtensions = new Set(Object.keys(languageByExtension));
+
+async function fileDigest(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
 
 function topLevelModules(files: string[]): string[] {
   const modules = new Set<string>();
@@ -76,25 +85,25 @@ function renderArchitecture(
 
 export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisResult> {
   const { root, exclude, maxFileBytes } = options;
-  const files = await fg(sourcePatterns, {
+  const discoveredFiles = await fg(sourcePatterns, {
     cwd: root,
     onlyFiles: true,
     unique: true,
     ignore: exclude,
     followSymbolicLinks: false,
   });
-  files.sort();
+  const files: string[] = [];
+  for (const path of discoveredFiles.sort()) {
+    if (basename(path) === "__init__.py") {
+      const content = await readable(join(root, path));
+      if (content !== undefined && isPythonPackageMarker(path, content)) continue;
+    }
+    files.push(path);
+  }
   const evidence: Evidence[] = [];
   const facts: Convention[] = [];
   const warnings: string[] = [];
   const languageCounts = new Map<string, number>();
-  let totalClasses = 0;
-  let inheritedClasses = 0;
-  let throwCount = 0;
-  let catchCount = 0;
-  let firstThrowEvidence: string | undefined;
-  let firstInheritanceEvidence: string | undefined;
-  let firstTestEvidence: string | undefined;
   let firstDependencyInjectionEvidence: string | undefined;
   let firstRepositoryEvidence: string | undefined;
   let firstResultEvidence: string | undefined;
@@ -118,22 +127,6 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
       if (!signals) continue;
       importsByFile.set(posixPath(relativePath), signals.imports);
       if (signals.hasErrors) warnings.push(`Tree-sitter recovered from syntax errors in ${posixPath(relativePath)}`);
-      totalClasses += signals.classes;
-      inheritedClasses += signals.inheritedClasses.length;
-      throwCount += signals.throws.length;
-      catchCount += signals.catches.length;
-      const thrown = signals.throws[0];
-      if (!firstThrowEvidence && thrown) {
-        firstThrowEvidence = addEvidence(evidence, posixPath(relativePath), thrown.line, "ast", thrown.excerpt);
-      }
-      const inherited = signals.inheritedClasses[0];
-      if (!firstInheritanceEvidence && inherited) {
-        firstInheritanceEvidence = addEvidence(evidence, posixPath(relativePath), inherited.line, "ast", inherited.excerpt);
-      }
-      const test = signals.testCalls[0];
-      if (!firstTestEvidence && test) {
-        firstTestEvidence = addEvidence(evidence, posixPath(relativePath), test.line, "ast", test.excerpt);
-      }
       const dependencyInjection = signals.dependencyInjection[0];
       if (!firstDependencyInjectionEvidence && dependencyInjection) {
         firstDependencyInjectionEvidence = addEvidence(evidence, posixPath(relativePath), dependencyInjection.line, "ast", dependencyInjection.excerpt);
@@ -175,15 +168,6 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
   }
 
   await analyzeConfigs(root, evidence, facts);
-  if (firstThrowEvidence && throwCount > 0) {
-    addConvention(facts, "error-handling", `The codebase uses exceptions for error propagation (${throwCount} throw/raise sites and ${catchCount} catch/except sites detected).`, 0.9, [firstThrowEvidence]);
-  }
-  if (firstInheritanceEvidence && totalClasses > 0) {
-    addConvention(facts, "oop", `Inheritance is present in ${inheritedClasses} of ${totalClasses} detected class declarations; preserve established base-class contracts when editing them.`, 0.85, [firstInheritanceEvidence]);
-  }
-  if (firstTestEvidence) {
-    addConvention(facts, "testing", "The repository contains test-style calls; update nearby tests when changing behavior.", 0.85, [firstTestEvidence]);
-  }
   if (firstDependencyInjectionEvidence) {
     addConvention(facts, "oop", "Dependency injection is used; preserve existing injection boundaries instead of constructing collaborators ad hoc.", 0.85, [firstDependencyInjectionEvidence]);
   }
@@ -257,6 +241,28 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     })
     .filter((item) => item.changes > 0 || item.fanIn > 0)
     .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+  const rankedImporters = [...new Set([...hotspots.map((item) => item.path), ...sourceFiles])];
+  let importEvidence = 0;
+  for (const path of rankedImporters) {
+    if (isTestPath(path)) continue;
+    const local = importsByFile.get(path)?.find((item) => resolveImport(path, item.specifier));
+    if (!local) continue;
+    addEvidence(evidence, path, local.line, "ast", local.excerpt);
+    importEvidence += 1;
+    if (importEvidence >= 32) break;
+  }
+  const structuredFiles: NonNullable<AnalysisResult["structure"]>["files"] = [];
+  const sortedSourceFiles = [...sourceFiles].sort();
+  for (let offset = 0; offset < sortedSourceFiles.length; offset += 16) {
+    structuredFiles.push(...await Promise.all(sortedSourceFiles.slice(offset, offset + 16).map(async (path) => ({
+      path,
+      kind: isTestPath(path) ? "test" as const : "source" as const,
+      module: moduleFor(path),
+      sha256: await fileDigest(join(root, path)),
+    }))));
+  }
+  const documentDigests = Object.fromEntries(await Promise.all(documentation.paths.map(async (path) =>
+    [path, await fileDigest(join(root, path))] as const)));
   return {
     conventions: { schemaVersion: 1, generatedAt: now, facts: facts.sort((a, b) => a.id.localeCompare(b.id)) },
     stack,
@@ -275,16 +281,14 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     structure: {
       schemaVersion: 1,
       generatedAt: now,
-      files: [...sourceFiles].sort().map((path) => ({
-        path,
-        kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const,
-        module: moduleFor(path),
-      })),
+      files: structuredFiles,
       imports: [...importsByFile].flatMap(([from, imports]) => imports.flatMap((item) => {
         const to = resolveImport(from, item.specifier);
         return to ? [{ from, to, line: item.line, excerpt: item.excerpt }] : [];
       })).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.line - b.line),
       documents: documentation.paths,
+      documentDigests,
+      documentLinks: documentation.links,
     },
   };
 }

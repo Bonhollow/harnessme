@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import yaml from "js-yaml";
 import type { z } from "zod";
@@ -64,4 +64,13 @@ export async function readJson<T>(path: string, schema: z.ZodType<T>): Promise<T
 
 export function posixPath(path: string): string {
   return path.replaceAll("\\", "/");
+}
+
+export function repositoryRelativePath(root: string, path: string): string {
+  const base = resolve(root);
+  const normalized = posixPath(relative(base, resolve(base, path)));
+  if (!normalized || normalized === ".." || normalized.startsWith("../") || isAbsolute(normalized)) {
+    throw new Error(`Path is outside the repository: ${path}`);
+  }
+  return normalized;
 }

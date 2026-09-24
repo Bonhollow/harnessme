@@ -107,6 +107,13 @@ export const CriticalPathSchema = z.object({
 export const CriticalPathsSchema = z.object({
   schemaVersion: z.literal(1),
   paths: z.array(CriticalPathSchema),
+  dismissed: z.array(z.string().min(1)).optional(),
+  reviews: z.array(z.object({
+    glob: z.string().min(1),
+    decision: z.enum(["activate", "dismiss"]),
+    reason: z.string().trim().min(8),
+    reviewedAt: z.string().datetime(),
+  })).optional(),
   heuristics: z.object({
     enabled: z.boolean(),
     minChanges: z.number().int().nonnegative(),
@@ -146,7 +153,7 @@ export const ReferenceDocumentSchema = z.object({
   scope: z.string().min(1).max(500),
   // `scope` remains the primary placement for backwards-compatible consumers.
   // Cross-cutting contracts can additionally name every affected source scope.
-  scopes: z.array(z.string().min(1).max(500)).min(1).max(12).optional(),
+  scopes: z.array(z.string().min(1).max(500)).min(1).optional(),
   description: z.string().min(1).max(300),
   markdown: z.string().min(100).max(8_000),
 });
@@ -237,6 +244,7 @@ export const RepositoryStructureSchema = z.object({
     path: z.string().min(1),
     kind: z.enum(["source", "test"]),
     module: z.string().min(1).optional(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   })),
   imports: z.array(z.object({
     from: z.string().min(1),
@@ -245,6 +253,8 @@ export const RepositoryStructureSchema = z.object({
     excerpt: z.string().min(1),
   })),
   documents: z.array(z.string().min(1)).default([]),
+  documentDigests: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/u)).optional(),
+  documentLinks: z.array(z.object({ document: z.string().min(1), path: z.string().min(1), line: z.number().int().positive() })).optional(),
 });
 
 export const FeatureRelationSchema = z.object({
@@ -379,6 +389,7 @@ export const defaultConfig = (targets: string[]): HarnessConfig => ({
 export const defaultCriticalPaths = (): CriticalPaths => ({
   schemaVersion: 1,
   paths: [],
+  dismissed: [],
   heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 },
 });
 

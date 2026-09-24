@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import TOML from "@iarna/toml";
 import fg from "fast-glob";
+import yaml from "js-yaml";
 import type { Evidence, Stack } from "@harnessme/core";
 import { addEvidence, lineOf, readable } from "./evidence.js";
 
@@ -80,12 +81,28 @@ export async function packageFacts(root: string, evidence: Evidence[]): Promise<
   const pyproject = await readable(join(root, "pyproject.toml"));
   if (pyproject) {
     try {
-      const project = (TOML.parse(pyproject) as Record<string, unknown>).project as { dependencies?: string[] } | undefined;
+      const metadata = TOML.parse(pyproject) as Record<string, unknown>;
+      const project = metadata.project as { dependencies?: string[] } | undefined;
       for (const spec of project?.dependencies ?? []) {
         const name = spec.match(/^[A-Za-z0-9_.-]+/u)?.[0] ?? spec;
         dependencies.push({ name, version: spec.slice(name.length) || "*", kind: "python", source: "pyproject.toml" });
         addEvidence(evidence, "pyproject.toml", lineOf(pyproject, spec), "dependency", spec);
         const framework = frameworkName(name); if (framework) frameworks.add(framework);
+      }
+      const pytestConfigured = Boolean((metadata.tool as Record<string, unknown> | undefined)?.pytest);
+      const pytestDependency = (project?.dependencies ?? []).some((spec) => /^pytest(?:[=<>!~\[]|$)/iu.test(spec));
+      if (packageManagers.includes("uv") && pytestConfigured && pytestDependency) {
+        commands.push("uv run pytest");
+        addEvidence(evidence, "pyproject.toml", lineOf(pyproject, "[tool.pytest"), "config", "uv run pytest");
+      }
+      const preCommitDependency = (project?.dependencies ?? []).some((spec) => /^pre-commit(?:[=<>!~\[]|$)/iu.test(spec));
+      const preCommitConfig = await readable(join(root, ".pre-commit-config.yaml"));
+      if (packageManagers.includes("uv") && preCommitDependency && preCommitConfig) {
+        const config = yaml.load(preCommitConfig) as { repos?: Array<{ hooks?: unknown[] }> } | undefined;
+        if (Array.isArray(config?.repos) && config.repos.some((repo) => repo && Array.isArray(repo.hooks) && repo.hooks.length > 0)) {
+          commands.push("uv run pre-commit run --all-files");
+          addEvidence(evidence, ".pre-commit-config.yaml", lineOf(preCommitConfig, "repos:"), "config", "uv run pre-commit run --all-files");
+        }
       }
     } catch { /* Keep scanning while metadata is invalid. */ }
   }

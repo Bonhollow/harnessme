@@ -3,6 +3,7 @@ import type { FactsSnapshot } from "./facts-store.js";
 import { minimatch } from "minimatch";
 import { createKnowledgeArtifacts } from "./knowledge-graph.js";
 import { defaultFeatureOverrides, defaultFeaturePack } from "./schema.js";
+import { isTestPath } from "./risk.js";
 
 export interface DriftItem {
   severity: "error" | "warning";
@@ -79,10 +80,13 @@ export function detectDrift(current: AnalysisResult, committed: FactsSnapshot): 
   if (committed.criticalPaths.heuristics.enabled) {
     const thresholds = committed.criticalPaths.heuristics;
     for (const hotspot of current.hotspots.filter((item) =>
-      item.changes >= thresholds.minChanges
-      || item.fanIn >= thresholds.minFanIn
-      || item.score >= thresholds.minScore
+      !isTestPath(item.path) && (
+        item.changes >= thresholds.minChanges
+        || item.fanIn >= thresholds.minFanIn
+        || item.score >= thresholds.minScore
+      )
     )) {
+      if (committed.criticalPaths.dismissed?.includes(hotspot.path)) continue;
       const registered = committed.criticalPaths.paths.some((item) => minimatch(hotspot.path, item.glob, { dot: true }));
       if (!registered) {
         drift.push({
@@ -96,6 +100,21 @@ export function detectDrift(current: AnalysisResult, committed: FactsSnapshot): 
   if (current.structure && committed.structure) {
     const oldFiles = committed.structure.files.map((item) => `${item.kind}:${item.path}`);
     const newFiles = current.structure.files.map((item) => `${item.kind}:${item.path}`);
+    const currentDigests = new Map(current.structure.files.map((item) => [item.path, item.sha256]));
+    const changedContent = committed.structure.files.filter((item) =>
+      item.sha256 && currentDigests.has(item.path) && currentDigests.get(item.path) !== item.sha256).map((item) => item.path);
+    if (changedContent.length) drift.push({
+      severity: "error",
+      category: "source",
+      message: `${changedContent.length} analyzed file(s) changed since the stored facts: ${changedContent.slice(0, 5).join(", ")}${changedContent.length > 5 ? ", ..." : ""}. Run \`harnessme refresh\`.`,
+    });
+    const changedDocuments = Object.entries(committed.structure.documentDigests ?? {}).filter(([path, digest]) =>
+      current.structure?.documentDigests?.[path] !== undefined && current.structure.documentDigests[path] !== digest).map(([path]) => path);
+    if (changedDocuments.length) drift.push({
+      severity: "error",
+      category: "documentation",
+      message: `${changedDocuments.length} repository document(s) changed since the stored facts: ${changedDocuments.slice(0, 5).join(", ")}${changedDocuments.length > 5 ? ", ..." : ""}. Run \`harnessme refresh\`.`,
+    });
     const oldImports = committed.structure.imports.map((item) => `${item.from}->${item.to}`);
     const newImports = current.structure.imports.map((item) => `${item.from}->${item.to}`);
     const addedFiles = setDifference(newFiles, oldFiles);

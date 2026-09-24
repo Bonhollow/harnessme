@@ -1,4 +1,5 @@
 import type { Evidence, FactsSnapshot, ReferenceDocument } from "@harnessme/core";
+import { isTestPath } from "../../../core/src/risk.js";
 
 export interface GuidanceConcern {
   slug: string;
@@ -30,7 +31,7 @@ export function guidanceDirectory(path: string): string | undefined {
 export function discoverGuidanceConcerns(facts: FactsSnapshot): GuidanceConcern[] {
   return DEFINITIONS.flatMap((definition) => {
     const sourceMatches = (facts.stack.sourcePaths ?? []).filter((path) =>
-      !/(?:^|\/)tests?(?:\/|$)/iu.test(path) && definition.pattern.test(path));
+      !isTestPath(path) && definition.pattern.test(path));
     const evidenceMatches = facts.evidence
       .filter((item) => definition.pattern.test(item.path) || definition.pattern.test(item.excerpt))
       .map((item) => item.path);
@@ -60,12 +61,14 @@ export function concernReferenceDocuments(facts: FactsSnapshot): ReferenceDocume
   const commands = facts.stack.validationCommands ?? [];
   return discoverGuidanceConcerns(facts).slice(0, 20).map((concern) => {
     const citations = concern.evidence.map((item) => `- Preserve the observed contract at \`${item.path}:${item.line}\`: ${item.excerpt}`).join("\n");
-    const ownership = concern.paths.slice(0, 12).map((path) => `- \`${path}\``).join("\n");
+    const ownership = concern.paths.slice(0, 12).map((path) => `- \`${path}\``).join("\n")
+      + (concern.paths.length > 12 ? `\n- ${concern.paths.length - 12} additional scoped path(s) are indexed in the knowledge graph; use \`harnessme context <path>\` for the changed file.` : "");
     const validation = commands.length ? commands.map((command) => `- \`${command}\``).join("\n") : "- Run the nearest verified repository check.";
     return {
       slug: concern.slug,
       title: concern.title,
       scope: concern.scope,
+      scopes: concern.paths,
       description: concern.description,
       markdown: `# ${concern.title}
 

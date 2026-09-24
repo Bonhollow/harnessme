@@ -13,12 +13,14 @@ const graph: KnowledgeGraph = {
     { id: "test:tests/auth.test.ts", kind: "test", label: "auth.test.ts", path: "tests/auth.test.ts", provenance: "deterministic", citations: [] },
     { id: "document:.harnessme/features/auth.md", kind: "document", label: "Authentication guide", path: ".harnessme/features/auth.md", provenance: "deterministic", citations: [] },
     { id: "document:.harnessme/references/security.md", kind: "document", label: "Security guide", path: ".harnessme/references/security.md", provenance: "deterministic", citations: [] },
+    { id: "document:.agents/corey-agent/references/auth.md", kind: "document", label: "Canonical auth rules", path: ".agents/corey-agent/references/auth.md", provenance: "deterministic", citations: [] },
     { id: "critical:auth", kind: "critical-path", label: "src/auth.ts", scope: "src/auth.ts", summary: "Security boundary", provenance: "maintainer", citations: [] },
   ],
   edges: [
     { id: "implements:feature:auth->file:src/auth.ts", from: "feature:auth", to: "file:src/auth.ts", kind: "implements", provenance: "maintainer", citations: [] },
     { id: "documented-by:feature:auth->document:.harnessme/features/auth.md", from: "feature:auth", to: "document:.harnessme/features/auth.md", kind: "documented-by", provenance: "deterministic", citations: [] },
     { id: "documented-by:feature:auth->document:.harnessme/references/security.md", from: "feature:auth", to: "document:.harnessme/references/security.md", kind: "documented-by", provenance: "deterministic", citations: [] },
+    { id: "documented-by:file:src/auth.ts->document:.agents/corey-agent/references/auth.md", from: "file:src/auth.ts", to: "document:.agents/corey-agent/references/auth.md", kind: "documented-by", provenance: "deterministic", citations: [{ path: ".agents/corey-agent/references/auth.md", line: 7 }] },
     { id: "verified-by:feature:auth->test:tests/auth.test.ts", from: "feature:auth", to: "test:tests/auth.test.ts", kind: "verified-by", provenance: "deterministic", citations: [] },
     { id: "depends-on:feature:auth->feature:sessions", from: "feature:auth", to: "feature:sessions", kind: "depends-on", provenance: "maintainer", citations: [] },
     { id: "imports:file:src/auth.ts->file:src/db.ts", from: "file:src/auth.ts", to: "file:src/db.ts", kind: "imports", provenance: "deterministic", citations: [] },
@@ -33,7 +35,7 @@ describe("change context", () => {
   it("combines ownership, guides, dependencies, consumers, tests, gates, and validation", () => {
     const context = resolveChangeContext(facts, ["src/auth.ts"]);
     expect(context.owners.map((node) => node.id)).toEqual(["feature:auth"]);
-    expect(context.guides.map((node) => node.path)).toEqual([".harnessme/features/auth.md", ".harnessme/references/security.md"]);
+    expect(context.guides.map((node) => node.path)).toEqual([".harnessme/features/auth.md", ".agents/corey-agent/references/auth.md", ".harnessme/references/security.md"]);
     expect(context.dependencies).toEqual(expect.arrayContaining([
       expect.objectContaining({ direction: "outgoing", node: expect.objectContaining({ id: "file:src/db.ts" }) }),
       expect.objectContaining({ direction: "incoming", node: expect.objectContaining({ id: "file:src/route.ts" }) }),

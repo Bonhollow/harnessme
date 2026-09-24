@@ -160,12 +160,14 @@ function operationalReferences() {
 
 describe("AI harness authoring", () => {
   it("accepts feature citations to discovered repository documentation", async () => {
+    let authorGateCandidates: Array<{ path: string }> | undefined;
+    let protectedContextGaps: Array<{ path: string; linkedDocuments: Array<{ path: string; line: number }> }> | undefined;
     const feature = {
       slug: "documented-core-contract",
       kind: "concern" as const,
       title: "Documented core contract",
       summary: "The core service follows the contract documented by the repository.",
-      scopes: ["src/**"],
+      scopes: ["src/**", "docs/CORE.md"],
       responsibilities: ["Keep the core implementation aligned with its documented contract."],
       invariants: ["Changes to the core contract remain documented."],
       validation: ["Run npm test."],
@@ -177,8 +179,16 @@ describe("AI harness authoring", () => {
       request.setEncoding("utf8");
       request.on("data", (chunk) => { body += chunk; });
       request.once("end", () => {
-        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
+        const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } }; messages?: Array<{ content: string }> };
         const schema = payload.response_format?.json_schema?.name;
+        if (schema === "harnessme_agents_draft") {
+          const input = JSON.parse(payload.messages?.at(-1)?.content ?? "{}") as {
+            gateCandidates?: Array<{ path: string }>;
+            protectedContextGaps?: typeof protectedContextGaps;
+          };
+          authorGateCandidates = input.gateCandidates;
+          protectedContextGaps = input.protectedContextGaps;
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
           markdown: operationalHarnessMarkdown(),
@@ -204,7 +214,7 @@ describe("AI harness authoring", () => {
       ],
       architecture: "# Observed architecture\n\nThe src module contains the application core.\n",
       directives: "# Project directives\n",
-      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+      criticalPaths: { schemaVersion: 1, paths: [{ glob: "src/entry.ts", reason: "Protected entry point", approvers: ["developer"], source: "explicit", status: "active", risk: "public-contract" }], dismissed: ["src/core.ts"], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
       changes: { schemaVersion: 1, changes: [] },
     };
     const analysis: AnalysisResult = {
@@ -214,8 +224,9 @@ describe("AI harness authoring", () => {
       architecture: facts.architecture,
       hotspots: [],
       warnings: [],
-      sourceFiles: ["src/core.ts"],
+      sourceFiles: ["src/core.ts", "src/entry.ts", "tests/core.test.ts"],
       commands: ["npm test"],
+      structure: { schemaVersion: 1, generatedAt: facts.stack.generatedAt, files: [], imports: [], documents: ["docs/CORE.md"], documentLinks: [{ path: "src/entry.ts", document: "docs/CORE.md", line: 2 }] },
     };
 
     const result = await authorHarnessWithAi({
@@ -237,7 +248,9 @@ describe("AI harness authoring", () => {
       },
     });
 
-    expect(result.features).toEqual([feature]);
+    expect(result.features).toEqual([{ ...feature, scopes: ["src/**"] }]);
+    expect(authorGateCandidates?.map((candidate) => candidate.path)).toEqual(["src/entry.ts"]);
+    expect(protectedContextGaps).toEqual([{ path: "src/entry.ts", reason: "Protected entry point", linkedDocuments: [{ path: "docs/CORE.md", line: 2 }] }]);
   });
 
   it("repairs a reviewed document that omits a required section", async () => {
@@ -333,7 +346,7 @@ describe("AI harness authoring", () => {
         const payload = JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } };
         const schema = payload.response_format?.json_schema?.name;
         const result = schema === "harnessme_agents_repair"
-          ? { markdown: operationalHarnessMarkdown(), gates: [], references: operationalReferences(), comparison: "Replaced inventory with grounded operating instructions." }
+          ? { markdown: operationalHarnessMarkdown(), gates: [], references: operationalReferences().map((reference) => ({ ...reference, markdown: reference.markdown.replace(/## Extension seams\n\n[\s\S]*?(?=\n## Invariants)/u, "").replaceAll("Evidence: `src/core.ts:1`.", "").replace("Update `src/core.ts`, its callers, consumers, and focused tests together.", "Keep aligned.") })), comparison: "Replaced inventory with grounded operating instructions." }
           : schema === "harnessme_agents_review"
             ? { markdown: inventory, gates: [], comparison: "Retained the repository inventory." }
             : { markdown: inventory, gates: [] };

@@ -12,7 +12,9 @@ import {
   createKnowledgeArtifacts,
   defaultFeatureOverrides,
   defaultFeaturePack,
+  GENERATED_FEATURE_MARKER,
 } from "@harnessme/core";
+import { isTestPath } from "../../core/src/risk.js";
 import { GENERATED_MARKER, extractPending, renderAgentsMd } from "./agents-md.js";
 import { resolveProviders } from "./providers.js";
 import { applyRuler } from "./ruler.js";
@@ -106,7 +108,7 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
   const structure = facts.structure ?? {
     schemaVersion: 1 as const,
     generatedAt: facts.stack.generatedAt,
-    files: (facts.stack.sourcePaths ?? []).map((path) => ({ path, kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const })),
+    files: (facts.stack.sourcePaths ?? []).map((path) => ({ path, kind: isTestPath(path) ? "test" as const : "source" as const })),
     imports: [],
     documents: facts.stack.documentationPaths ?? [],
   };
@@ -136,7 +138,8 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
   for (const entry of await readdir(featureDir, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".md") || expectedFeatures.has(entry.name)) continue;
     const path = join(featureDir, entry.name);
-    if ((await readText(path)).startsWith(GENERATED_MARKER)) await unlink(path);
+    const content = await readText(path);
+    if (content.startsWith(GENERATED_FEATURE_MARKER) || content.startsWith(GENERATED_MARKER)) await unlink(path);
   }
   for (const document of knowledge.documents) {
     await atomicWrite(join(root, document.path), document.markdown.endsWith("\n") ? document.markdown : `${document.markdown}\n`);

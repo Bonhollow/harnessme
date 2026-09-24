@@ -1,4 +1,4 @@
-import { classifyRisk, type RiskCategory } from "../../core/src/risk.js";
+import { classifyRisk, isTestPath, type RiskCategory } from "../../core/src/risk.js";
 
 export interface CriticalCandidate {
   path: string;
@@ -11,7 +11,7 @@ export function criticalCandidates(sourceFiles: string[]): CriticalCandidate[] {
   const seen = new Set<string>();
   const candidates: CriticalCandidate[] = [];
   for (const path of sourceFiles) {
-    if (/(?:^|\/)(?:test|tests|__tests__)(?:\/|$)/iu.test(path)) continue;
+    if (isTestPath(path)) continue;
     const risk = classifyRisk(path);
     if (risk === "other" || seen.has(path)) continue;
     const directSignal = risk !== "shared-core"

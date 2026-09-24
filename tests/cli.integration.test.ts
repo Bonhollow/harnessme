@@ -1,10 +1,12 @@
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
+import { readCriticalPaths, readQualityHistory, writeYaml } from "../packages/core/src/index.js";
 
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
@@ -93,6 +95,22 @@ async function execWithInput(command: string, args: string[], input: string): Pr
 }
 
 describe("CLI", () => {
+  it("keeps pytest configuration out of source navigation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-pytest-config-"));
+    await mkdir(join(root, "src"));
+    await mkdir(join(root, "src", "docs_only"));
+    await mkdir(join(root, "src", "exports"));
+    await writeFile(join(root, "src", "app.py"), "def run():\n    return True\n");
+    await writeFile(join(root, "src", "__init__.py"), "");
+    await writeFile(join(root, "src", "docs_only", "__init__.py"), '"""Package description only."""\n');
+    await writeFile(join(root, "src", "exports", "__init__.py"), "from ..app import run\n");
+    await writeFile(join(root, "pytest.ini"), "[pytest]\nasyncio_mode = auto\n");
+    const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const structure = JSON.parse(await readFile(join(root, ".harnessme", "facts", "structure.json"), "utf8")) as { files: Array<{ path: string }> };
+    expect(structure.files.map((file) => file.path)).toEqual(["src/app.py", "src/exports/__init__.py"]);
+    expect(initialized.stderr).not.toContain("syntax errors in pytest.ini");
+  }, 30_000);
+
   it("refreshes scoped guidance while preserving maintainer-owned pending notes", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-refresh-"));
     await mkdir(join(root, "src"));
@@ -142,7 +160,109 @@ describe("CLI", () => {
     const preview = await exec(process.execPath, [cli, "sync", "--preview", "--root", root]);
     expect(preview.stdout).toContain("MODIFIED AGENTS.md");
     expect(await readFile(join(root, "AGENTS.md"), "utf8")).toBe(previewSource);
+    const instructionDrift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(instructionDrift.code).toBe(1);
+    expect(instructionDrift.stdout).toContain("AGENTS.md differs from canonical stored facts");
+    await writeFile(join(root, "AGENTS.md"), agents);
+    const referencePath = join(root, ".harnessme", "references", "repository-workflow.md");
+    await writeFile(referencePath, `${await readFile(referencePath, "utf8")}\nUnreviewed change.\n`);
+    const referenceDrift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(referenceDrift.code).toBe(1);
+    expect(referenceDrift.stdout).toContain("repository-workflow.md differs from canonical stored facts");
   }, 30_000);
+
+  it("detects edits to generated scoped guidance", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-scoped-drift-"));
+    await mkdir(join(root, "src", "auth"), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "scoped-drift-fixture" }));
+    await writeFile(join(root, "src", "auth", "session.ts"), "export function session() { return true; }\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const path = join(root, "src", "auth", "AGENTS.md");
+    const generated = await readFile(path, "utf8");
+    expect(generated).toContain("Scoped agent guidance");
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+    await writeFile(path, `${generated}\nUnreviewed scoped rule.\n`);
+    const drift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(drift.code).toBe(1);
+    expect(drift.stdout).toContain("src/auth/AGENTS.md differs from canonical stored facts");
+  });
+
+  it("detects removal or editing of the generated CI gate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-workflow-drift-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "workflow-drift-fixture" }));
+    await writeFile(join(root, "core.ts"), "export const core = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const path = join(root, ".github", "workflows", "harnessme.yml");
+    const generated = await readFile(path, "utf8");
+    await writeFile(path, generated.replace("critical-gate", "critical-skip"));
+    const edited = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(edited.code).toBe(1);
+    expect(edited.stdout).toContain(".github/workflows/harnessme.yml differs from canonical");
+    await writeFile(path, generated.replace(/^# .*\n/u, "# User workflow\n").replace("critical-gate", "critical-skip"));
+    const unmarked = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(unmarked.code).toBe(1);
+    expect(unmarked.stdout).toContain(".github/workflows/harnessme-generated.yml differs from canonical");
+    await unlink(path);
+    const removed = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(removed.code).toBe(1);
+    expect(removed.stdout).toContain(".github/workflows/harnessme.yml differs from canonical");
+  }, 30_000);
+
+  it("keeps a custom workflow while requiring a managed CI gate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-custom-workflow-"));
+    const primary = join(root, ".github", "workflows", "harnessme.yml");
+    await mkdir(join(root, ".github", "workflows"), { recursive: true });
+    await writeFile(primary, "name: User workflow\non: push\njobs: {}\n");
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "custom-workflow-fixture" }));
+    await writeFile(join(root, "core.ts"), "export const core = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    expect(await readFile(primary, "utf8")).toBe("name: User workflow\non: push\njobs: {}\n");
+    const generated = join(root, ".github", "workflows", "harnessme-generated.yml");
+    expect(await readFile(generated, "utf8")).toContain("critical-gate");
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+    await unlink(generated);
+    const drift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(drift.code).toBe(1);
+    expect(drift.stdout).toContain(".github/workflows/harnessme-generated.yml differs from canonical");
+  }, 30_000);
+
+  it("detects source edits that leave paths and imports unchanged", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-source-freshness-"));
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "source-freshness-fixture" }));
+    const source = join(root, "src", "service.ts");
+    await writeFile(join(root, "src", "core.ts"), "export const core = true;\n");
+    await writeFile(source, "import { core } from './core.js';\nexport function answer() { return core ? 1 : 0; }\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const evidence = JSON.parse(await readFile(join(root, ".harnessme", "facts", "evidence.json"), "utf8")) as Array<{ path: string; excerpt: string }>;
+    expect(evidence).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/service.ts", excerpt: "from './core.js'" })]));
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+    await writeFile(source, "import { core } from './core.js';\nexport function answer() { return core ? 2 : 0; }\n");
+    const drift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(drift.code).toBe(1);
+    expect(drift.stdout).toContain("src/service.ts");
+    expect(drift.stdout).toContain("changed since the stored facts");
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+  });
+
+  it("detects documentation edits even when paths and conflicts are unchanged", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-doc-freshness-"));
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "doc-freshness-fixture" }));
+    await writeFile(join(root, "src", "service.ts"), "export const service = true;\n");
+    const readme = join(root, "README.md");
+    await writeFile(readme, "Service behavior is stable.\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+    await writeFile(readme, "Service behavior has new details.\n");
+    const drift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
+    expect(drift.code).toBe(1);
+    expect(drift.stdout).toContain("README.md");
+    expect(drift.stdout).toContain("repository document(s) changed since the stored facts");
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
+  });
 
   it("requires explicit deterministic mode when auto finds no inference CLI", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-auto-no-inference-"));
@@ -499,6 +619,41 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     }
   }, 30_000);
 
+  it("checks an AI-authored supported-language repository without another model call", async () => {
+    let requests = 0;
+    const server = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => { body += chunk; });
+      request.once("end", () => {
+        requests += 1;
+        const schema = (JSON.parse(body) as { response_format?: { json_schema?: { name?: string } } }).response_format?.json_schema?.name;
+        const content = schema === "harnessme_facts" ? { facts: [] }
+          : schema === "harnessme_verification" ? { approvedIds: [] }
+            : schema === "harnessme_agents_draft" ? { markdown: authoredHarness("This fixture serves values to callers through a small module.", undefined, "app.ts"), gates: [] }
+              : { markdown: authoredHarness("This fixture serves values to callers through a small module.", undefined, "app.ts"), gates: [], comparison: "Kept the source-backed operating guidance." };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }));
+      });
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test AI server did not expose a port.");
+    const root = await mkdtemp(join(tmpdir(), "harnessme-stable-check-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "stable-check-fixture" }));
+    await writeFile(join(root, "app.ts"), "export const value = 1;\n");
+    try {
+      const endpoint = `http://127.0.0.1:${address.port}/v1/chat/completions`;
+      await exec(process.execPath, [cli, "init", "--root", root, "--provider", "http", "--ai-endpoint", endpoint, "--model", "test-model", "--council-size", "1"]);
+      const beforeCheck = requests;
+      const checked = await exec(process.execPath, [cli, "check", "--root", root]);
+      expect(checked.stdout).toContain("no drift detected");
+      expect(requests).toBe(beforeCheck);
+    } finally {
+      await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+    }
+  }, 30_000);
+
   it("uses the configured independent provider to review model findings", async () => {
     const models: string[] = [];
     const server = createServer((request, response) => {
@@ -528,6 +683,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
       const root = await mkdtemp(join(tmpdir(), "harnessme-independent-review-"));
       await writeFile(join(root, "package.json"), JSON.stringify({ name: "review-fixture" }));
       await writeFile(join(root, "App.swift"), "struct App {\n}\n");
+      await writeFile(join(root, "Other.swift"), "struct Other {\n}\n");
       const initialized = await exec(process.execPath, [
         cli, "init", "--root", root, "--provider", "http", "--ai-endpoint", endpoint, "--model", "analyst-model",
         "--review-provider", "http", "--review-ai-endpoint", endpoint, "--review-model", "reviewer-model",
@@ -537,6 +693,42 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
       expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Project purpose\n\nA fixture for independent model review.");
       const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
       expect(configuration).toContain("reviewer-model");
+      const registry = await readCriticalPaths(root);
+      registry.paths.push({
+        glob: "App.swift", reason: "Stale generated proposal", approvers: ["developer"],
+        source: "ai-reviewed", status: "proposed", risk: "shared-core",
+      }, {
+        glob: "package.json", reason: "Reviewed package metadata contract", approvers: ["developer"],
+        source: "ai-reviewed", status: "active", risk: "public-contract",
+      });
+      registry.reviews = [{ glob: "App.swift", decision: "activate", reason: "Reviewed application entry contract", reviewedAt: new Date().toISOString() }];
+      await writeYaml(join(root, ".harnessme", "critical-paths.yaml"), registry);
+      await writeFile(join(root, ".harnessme", "facts", "features.json"), JSON.stringify({
+        schemaVersion: 1, generatedAt: new Date().toISOString(), features: [{
+          slug: "swift-application", kind: "feature", title: "Swift application", summary: "Application entry and startup behavior.",
+          scopes: ["App.swift"], responsibilities: ["Start the application."], invariants: ["Keep startup valid."],
+          validation: ["Inspect App.swift."], citations: [{ path: "App.swift", line: 1 }], relationships: [],
+        }],
+      }));
+      await exec(process.execPath, [cli, "refresh", "--root", root]);
+      expect((await readCriticalPaths(root)).paths.find((entry) => entry.glob === "App.swift")).toMatchObject({
+        source: "ai-reviewed", status: "active", reason: "Reviewed application entry contract",
+      });
+      expect((await readCriticalPaths(root)).paths.find((entry) => entry.glob === "package.json")).toMatchObject({
+        source: "ai-reviewed", status: "active", reason: "Reviewed package metadata contract",
+      });
+      const retainedFeatures = JSON.parse(await readFile(join(root, ".harnessme", "facts", "features.json"), "utf8")) as { features: Array<{ slug: string }> };
+      expect(retainedFeatures.features.map((feature) => feature.slug)).toContain("swift-application");
+      expect((await exec(process.execPath, [cli, "check", "--root", root])).stdout).toContain("check passed");
+      await writeFile(join(root, "Other.swift"), "struct Other { let value = 1 }\n");
+      await exec(process.execPath, [cli, "refresh", "--root", root]);
+      const afterUnrelatedEdit = JSON.parse(await readFile(join(root, ".harnessme", "facts", "features.json"), "utf8")) as { features: Array<{ slug: string }> };
+      expect(afterUnrelatedEdit.features.map((feature) => feature.slug)).toContain("swift-application");
+      await writeFile(join(root, "App.swift"), "struct App {\n  let changed = true\n}\n");
+      const changedRefresh = await exec(process.execPath, [cli, "refresh", "--root", root]);
+      expect(changedRefresh.stderr).toContain("Dropped 1 feature definition(s) without matching replacements");
+      const afterOwnedEdit = JSON.parse(await readFile(join(root, ".harnessme", "facts", "features.json"), "utf8")) as { features: Array<{ slug: string }> };
+      expect(afterOwnedEdit.features.map((feature) => feature.slug)).not.toContain("swift-application");
     } finally {
       await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
     }
@@ -544,31 +736,96 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
 
   it("promotes high fan-in source files to critical paths during init", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-fanin-"));
+    await mkdir(join(root, "tests"));
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "fanin-fixture" }));
     await writeFile(join(root, "core.ts"), "export const core = true;\n");
+    await writeFile(join(root, "tests", "shared.ts"), "export const shared = true;\n");
     for (let index = 0; index < 5; index += 1) {
       await writeFile(join(root, `consumer-${index}.ts`), "import { core } from './core';\nexport const value = core;\n");
+      await writeFile(join(root, "tests", `case-${index}.ts`), "import { shared } from './shared';\nexport const value = shared;\n");
     }
     await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--critical-approvers", "owner"]);
     const registry = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
     expect(registry).toContain("glob: core.ts");
     expect(registry).toContain("source: heuristic");
     expect(registry).toContain("status: proposed");
+    expect(registry).not.toContain("glob: tests/shared.ts");
     const proposedAgents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(proposedAgents).toContain("`core.ts`");
-    expect(proposedAgents).toContain("suggested only; no gate applies");
+    expect(registry).toContain("core.ts");
+    expect(proposedAgents).toContain("1 candidate awaits review in `.harnessme/critical-paths.yaml`");
+    expect(proposedAgents).toContain("no gate applies");
     const proposedGate = await exec(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root]);
     expect(proposedGate.stdout).toContain("Critical gate passed");
-    await exec(process.execPath, [cli, "critical", "activate", "core.ts", "--root", root]);
+    await exec(process.execPath, [cli, "critical", "activate", "core.ts", "--reason", "Shared API used by five consumers", "--root", root]);
     const activeAgents = await readFile(join(root, "AGENTS.md"), "utf8");
     expect(activeAgents).toContain("`core.ts`");
     expect(activeAgents).toContain("ask the developer for explicit confirmation");
     const activeGate = await execWithInput(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root], "");
     expect(activeGate.code).toBe(2);
-    await exec(process.execPath, [cli, "critical", "remove", "core.ts", "--root", root]);
+    await exec(process.execPath, [cli, "critical", "remove", "core.ts", "--reason", "The fixture has no protected contract", "--root", root]);
     const removedGate = await exec(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root]);
     expect(removedGate.stdout).toContain("Critical gate passed");
-    expect(await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8")).not.toContain("glob: core.ts");
+    expect(await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8")).toContain("dismissed:\n  - core.ts");
+    expect((await readCriticalPaths(root)).reviews).toEqual([
+      expect.objectContaining({ glob: "core.ts", decision: "activate", reason: "Shared API used by five consumers" }),
+      expect.objectContaining({ glob: "core.ts", decision: "dismiss", reason: "The fixture has no protected contract" }),
+    ]);
+    expect((await readQualityHistory(root)).snapshots.at(-1)?.trigger).toBe("gate-review");
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    const refreshedRegistry = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
+    expect((await readCriticalPaths(root)).paths.some((entry) => entry.glob === "core.ts")).toBe(false);
+    expect(refreshedRegistry).not.toContain("glob: tests/shared.ts");
+    expect(refreshedRegistry).toContain("dismissed:\n  - core.ts");
+    expect((await readCriticalPaths(root)).reviews).toHaveLength(2);
+    const checked = await exec(process.execPath, [cli, "check", "--root", root]);
+    expect(checked.stdout).toContain("check passed");
+    await exec(process.execPath, [cli, "critical", "add", "core.ts", "--reason", "Owner-approved shared contract", "--approvers", "owner", "--root", root]);
+    expect(await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8")).not.toContain("dismissed:\n  - core.ts");
+  }, 30_000);
+
+  it("keeps dismissed proposals out of later refreshes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-dismiss-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "dismiss-fixture" }));
+    await writeFile(join(root, "core.ts"), "export const core = true;\n");
+    for (let index = 0; index < 5; index += 1) {
+      await writeFile(join(root, `consumer-${index}.ts`), "import { core } from './core';\nexport const value = core;\n");
+    }
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic"]);
+    await exec(process.execPath, [cli, "critical", "remove", "core.ts", "--reason", "Reviewed fixture path is not critical", "--root", root]);
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    const registry = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
+    expect((await readCriticalPaths(root)).paths.some((entry) => entry.glob === "core.ts")).toBe(false);
+    expect(registry).toContain("dismissed:\n  - core.ts");
+  }, 30_000);
+
+  it("reviews multiple gate proposals atomically with reasons", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-gate-review-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "review-fixture" }));
+    await writeFile(join(root, "core.ts"), "export const core = true;\n");
+    await writeFile(join(root, "shared.ts"), "export const shared = true;\n");
+    for (let index = 0; index < 5; index += 1) {
+      await writeFile(join(root, `consumer-${index}.ts`), "import { core } from './core';\nimport { shared } from './shared';\nexport const value = core && shared;\n");
+    }
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic"]);
+    const before = await readCriticalPaths(root);
+    expect(before.paths.filter((entry) => entry.status === "proposed").map((entry) => entry.glob)).toEqual(expect.arrayContaining(["core.ts", "shared.ts"]));
+    const planPath = join(root, "gate-review.yaml");
+    await writeFile(planPath, "schemaVersion: 1\ndecisions:\n  - glob: core.ts\n    decision: activate\n    reason: Shared contract used by five consumers\n  - glob: shared.ts\n    decision: dismiss\n    reason: Shared value is a fixture constant only\n");
+    const preview = await exec(process.execPath, [cli, "critical", "review", "--file", planPath, "--dry-run", "--root", root]);
+    expect(preview.stdout).toContain("no files changed");
+    expect((await readCriticalPaths(root)).reviews).toBeUndefined();
+    await writeFile(planPath, "schemaVersion: 1\ndecisions:\n  - glob: core.ts\n    decision: activate\n    reason: Shared contract used by five consumers\n  - glob: missing.ts\n    decision: dismiss\n    reason: Reviewed fixture has no contract\n");
+    await expect(exec(process.execPath, [cli, "critical", "review", "--file", planPath, "--root", root])).rejects.toThrow(/requires a proposed critical path/u);
+    expect((await readCriticalPaths(root)).reviews).toBeUndefined();
+    await writeFile(planPath, "schemaVersion: 1\ndecisions:\n  - glob: core.ts\n    decision: activate\n    reason: Shared contract used by five consumers\n  - glob: shared.ts\n    decision: dismiss\n    reason: Shared value is a fixture constant only\n");
+    await exec(process.execPath, [cli, "critical", "review", "--file", planPath, "--root", root]);
+    const after = await readCriticalPaths(root);
+    expect(after.paths.find((entry) => entry.glob === "core.ts")?.status).toBe("active");
+    expect(after.paths.some((entry) => entry.glob === "shared.ts")).toBe(false);
+    expect(after.dismissed).toContain("shared.ts");
+    expect(after.reviews).toHaveLength(2);
+    expect((await readQualityHistory(root)).snapshots.at(-1)?.trigger).toBe("gate-review");
+    expect((await exec(process.execPath, [cli, "check", "--root", root])).stdout).toContain("check passed");
   }, 30_000);
 
   it("initializes, renders, and detects drift in a mixed-language repository", async () => {
@@ -588,7 +845,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     expect(initialized.stderr).toContain("progress: [===.................] 1/6 Preparing the HarnessME workspace");
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
     expect(agents).toContain("Evidence: `.editorconfig:3`");
-    expect(agents).toContain("Preserve the established exception propagation and handling pattern");
+    expect(agents).not.toContain("Preserve the established exception propagation and handling pattern");
     expect(agents).not.toContain("language percentage");
     expect(initialized.stderr).not.toContain("Could not parse");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
@@ -627,6 +884,79 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await expect(exec(process.execPath, [cli, "check", "--ci", "--root", root])).rejects.toMatchObject({ code: 1 });
   }, 30_000);
 
+  it("preserves existing root and nested agent rules through initialization and refresh", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-import-rules-"));
+    await mkdir(join(root, "src"));
+    const rootRules = "# Existing rules\n\nBefore changing the entry method, ask for explicit approval.\n\nRead `src/AGENTS.md` for source changes.\n";
+    const nestedRules = "# Source rules\n\nKeep tenant identifiers scoped to each request.\n";
+    await writeFile(join(root, "AGENTS.md"), rootRules);
+    await writeFile(join(root, "src", "AGENTS.md"), nestedRules);
+    await writeFile(join(root, "src", "handler.ts"), "export function handle(): void {}\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    expect(await readFile(join(root, ".harnessme", "imported-AGENTS.md"), "utf8")).toBe(rootRules);
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Before changing the entry method, ask for explicit approval.");
+    expect(await readFile(join(root, "src", "AGENTS.md"), "utf8")).toBe(nestedRules);
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Before changing the entry method, ask for explicit approval.");
+    expect(await readFile(join(root, "src", "AGENTS.md"), "utf8")).toBe(nestedRules);
+  }, 30_000);
+
+  it("turns unambiguous protected methods in imported rules into active path gates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-protected-import-"));
+    await writeFile(join(root, "AGENTS.md"), "# Existing rules\n\n- Do not touch the main entry methods unless the owner approves:\n  `service.run_agent()`, `start_server()`.\n");
+    await writeFile(join(root, "service.py"), "async def run_agent():\n    pass\n");
+    await writeFile(join(root, "main.py"), "def start_server():\n    pass\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const registry = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
+    expect(registry).toContain("glob: service.py");
+    expect(registry).toContain("glob: main.py");
+    expect(registry.match(/status: active/gu)).toHaveLength(2);
+    await expect(exec(process.execPath, [cli, "critical-gate", "--path", "service.py", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    expect(await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8")).toContain("glob: service.py");
+    await expect(exec(process.execPath, [cli, "critical", "remove", "main.py", "--reason", "Attempted override of directive", "--root", root]))
+      .rejects.toThrow(/protected by imported maintainer directives/u);
+    const manuallyEdited = await readCriticalPaths(root);
+    manuallyEdited.paths = manuallyEdited.paths.filter((entry) => entry.glob !== "main.py");
+    manuallyEdited.dismissed = ["main.py"];
+    await writeYaml(join(root, ".harnessme", "critical-paths.yaml"), manuallyEdited);
+    await expect(exec(process.execPath, [cli, "check", "--root", root])).rejects.toMatchObject({
+      code: 1,
+      stdout: expect.stringContaining("main.py is protected by imported maintainer directives but has no active gate"),
+    });
+    const missingGate = await execWithInput(process.execPath, [cli, "critical-gate", "--path", "main.py", "--root", root], "");
+    expect(missingGate.code).toBe(2);
+    expect(missingGate.stderr).toContain("Restore the directive-derived gate");
+    const hook = await execWithInput(process.execPath, [cli, "critical-gate", "--hook", "--root", root], JSON.stringify({ tool_input: { file_path: "main.py" } }));
+    expect(hook.code).toBe(0);
+    expect(hook.stdout).toContain('"permissionDecision":"deny"');
+    await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"]);
+    const updated = await readFile(join(root, ".harnessme", "critical-paths.yaml"), "utf8");
+    expect(updated).toContain("glob: main.py");
+    expect(updated).not.toContain("dismissed:\n  - main.py");
+    await expect(exec(process.execPath, [cli, "critical-gate", "--path", "main.py", "--root", root])).rejects.toMatchObject({ code: 2 });
+  }, 30_000);
+
+  it("blocks staged removal of a protected method even when its gate registry was edited", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-directive-commit-"));
+    await writeFile(join(root, "AGENTS.md"), "# Existing rules\n\n- Do not touch the main entry methods unless the owner approves:\n  `start_server()`.\n");
+    await writeFile(join(root, "main.py"), "def start_server():\n    return True\n");
+    await exec("git", ["init"], { cwd: root });
+    await exec("git", ["add", "AGENTS.md", "main.py"], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], { cwd: root });
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const config = await readCriticalPaths(root);
+    config.paths = config.paths.filter((entry) => entry.glob !== "main.py");
+    config.dismissed = ["main.py"];
+    await writeYaml(join(root, ".harnessme", "critical-paths.yaml"), config);
+    await writeFile(join(root, "main.py"), "def replacement():\n    return True\n");
+    await exec("git", ["add", "main.py", ".harnessme/critical-paths.yaml"], { cwd: root });
+    const gated = await execWithInput(process.execPath, [cli, "critical-gate", "--root", root], "");
+    expect(gated.code).toBe(2);
+    expect(gated.stderr).toContain("main.py");
+    expect(gated.stderr).toContain("Restore the directive-derived gate");
+  }, 30_000);
+
   it("binds critical approval to the exact staged file content", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-gate-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ name: "gate-fixture" }, null, 2));
@@ -642,6 +972,10 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await exec(process.execPath, [cli, "hooks", "install", "--root", root]);
     expect((await exec(process.execPath, [cli, "hooks", "status", "--root", root])).stdout).toContain("is installed");
     await exec(process.execPath, [cli, "critical", "add", "payment.ts", "--reason", "money movement", "--approvers", "owner", "--root", root]);
+    const absoluteEdit = await execWithInput(process.execPath, [cli, "critical-gate", "--path", join(root, "payment.ts"), "--root", root], "");
+    expect(absoluteEdit.code).toBe(2);
+    const dottedEdit = await execWithInput(process.execPath, [cli, "critical-gate", "--path", "folder/../payment.ts", "--root", root], "");
+    expect(dottedEdit.code).toBe(2);
     const hook = await execWithInput(process.execPath, [cli, "critical-gate", "--hook", "--root", root], JSON.stringify({ tool_input: { file_path: join(root, "payment.ts") } }));
     expect(hook.code).toBe(0);
     expect(hook.stdout).toContain('"permissionDecision":"ask"');
@@ -658,6 +992,48 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     const passed = await exec(process.execPath, [cli, "critical-gate", "--root", root]);
     expect(passed.stdout).toContain("Critical gate passed");
 
+    const recordPath = join(root, ".harnessme", "critical-log", record!);
+    const approvedRecord = await readFile(recordPath, "utf8");
+    await writeFile(recordPath, approvedRecord.replace("status: approved", "status: draft"));
+    await exec("git", ["add", `.harnessme/critical-log/${record}`], { cwd: root });
+    await writeFile(recordPath, approvedRecord);
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["add", `.harnessme/critical-log/${record}`], { cwd: root });
+
+    const indexPath = join(root, ".harnessme", "CRITICAL.md");
+    const approvedIndex = await readFile(indexPath, "utf8");
+    await writeFile(indexPath, "# Staged index without the approved change\n");
+    await exec("git", ["add", ".harnessme/CRITICAL.md"], { cwd: root });
+    await writeFile(indexPath, approvedIndex);
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["add", ".harnessme/CRITICAL.md"], { cwd: root });
+
+    const manifestPath = join(root, ".harnessme", "critical.json");
+    const approvedManifest = await readFile(manifestPath, "utf8");
+    await writeFile(manifestPath, "{}\n");
+    await exec("git", ["add", ".harnessme/critical.json"], { cwd: root });
+    await writeFile(manifestPath, approvedManifest);
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["add", ".harnessme/critical.json"], { cwd: root });
+
+    const forged = matter(approvedRecord);
+    forged.data.approvers = ["attacker"];
+    forged.data["approved-by"] = "attacker";
+    await writeFile(recordPath, matter.stringify(forged.content, forged.data));
+    await writeFile(indexPath, approvedIndex.replace("@owner", "@attacker"));
+    const forgedManifest = JSON.parse(approvedManifest) as { records: Array<{ file: string; approvers: string[]; approvedBy?: string }> };
+    const forgedManifestRecord = forgedManifest.records.find((item) => item.file === record);
+    expect(forgedManifestRecord).toBeDefined();
+    forgedManifestRecord!.approvers = ["attacker"];
+    forgedManifestRecord!.approvedBy = "attacker";
+    await writeFile(manifestPath, `${JSON.stringify(forgedManifest, null, 2)}\n`);
+    await exec("git", ["add", `.harnessme/critical-log/${record}`, ".harnessme/CRITICAL.md", ".harnessme/critical.json"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await writeFile(recordPath, approvedRecord);
+    await writeFile(indexPath, approvedIndex);
+    await writeFile(manifestPath, approvedManifest);
+    await exec("git", ["add", `.harnessme/critical-log/${record}`, ".harnessme/CRITICAL.md", ".harnessme/critical.json"], { cwd: root });
+
     await writeFile(join(root, "payment.ts"), "export const amount = 3;\n");
     await exec("git", ["add", "payment.ts"], { cwd: root });
     await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
@@ -665,6 +1041,21 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await writeFile(join(root, "payment.ts"), "export const amount = 2;\n");
     await exec("git", ["add", "."], { cwd: root });
     await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--no-verify", "-m", "approved critical change"], { cwd: root });
+    expect((await exec(process.execPath, [cli, "critical-gate", "--base", "HEAD~1", "--root", root])).stdout).toContain("Critical gate passed");
+    await writeFile(recordPath, matter.stringify(forged.content, forged.data));
+    expect((await exec(process.execPath, [cli, "critical-gate", "--base", "HEAD~1", "--root", root])).stdout).toContain("Critical gate passed");
+    await writeFile(recordPath, approvedRecord);
+
+    const registryPath = join(root, ".harnessme", "critical-paths.yaml");
+    const weakened = await readCriticalPaths(root);
+    weakened.paths = weakened.paths.filter((entry) => entry.glob !== "payment.ts");
+    await writeYaml(registryPath, weakened);
+    await writeFile(join(root, "payment.ts"), "export const amount = 3;\n");
+    await exec("git", ["add", "payment.ts", ".harnessme/critical-paths.yaml"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--no-verify", "-m", "attempted gate removal"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--base", "HEAD~1", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["reset", "--hard", "HEAD~1"], { cwd: root });
     const deletionDraft = await exec(process.execPath, [cli, "critical", "draft", "payment.ts", "--summary", "remove legacy payment", "--root", root]);
     const deletionRecord = deletionDraft.stdout.match(/critical-log\/([^\s]+\.md)/u)?.[1];
     await exec("git", ["rm", "payment.ts"], { cwd: root });
@@ -672,6 +1063,43 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await exec("git", ["add", `.harnessme/critical-log/${deletionRecord}`, ".harnessme/CRITICAL.md", ".harnessme/critical.json"], { cwd: root });
     const deletionPassed = await exec(process.execPath, [cli, "critical-gate", "--root", root]);
     expect(deletionPassed.stdout).toContain("Critical gate passed");
+  }, 30_000);
+
+  it("gates Git paths that Git would quote in text output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-git-paths-"));
+    const filename = "sécurité.ts";
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "quoted-path-fixture" }));
+    await writeFile(join(root, filename), "export const guarded = 1;\n");
+    await exec("git", ["init"], { cwd: root });
+    await exec("git", ["add", "."], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], { cwd: root });
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    await exec(process.execPath, [cli, "critical", "add", filename, "--reason", "Protected Unicode source contract", "--approvers", "owner", "--root", root]);
+    await writeFile(join(root, filename), "export const guarded = 2;\n");
+    await exec("git", ["add", filename], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["add", ".harnessme/critical-paths.yaml"], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--no-verify", "-m", "change guarded source"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--base", "HEAD~1", "--root", root])).rejects.toMatchObject({ code: 2 });
+  }, 30_000);
+
+  it("gates a protected source file replaced by a symlink", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-type-change-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "type-change-fixture" }));
+    await writeFile(join(root, "guarded.ts"), "export const guarded = true;\n");
+    await writeFile(join(root, "target.ts"), "export const target = true;\n");
+    await exec("git", ["init"], { cwd: root });
+    await exec("git", ["add", "."], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], { cwd: root });
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    await exec(process.execPath, [cli, "critical", "add", "guarded.ts", "--reason", "Protected source contract", "--approvers", "owner", "--root", root]);
+    await unlink(join(root, "guarded.ts"));
+    await symlink("target.ts", join(root, "guarded.ts"));
+    await exec("git", ["add", "guarded.ts"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--root", root])).rejects.toMatchObject({ code: 2 });
+    await exec("git", ["add", ".harnessme/critical-paths.yaml"], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--no-verify", "-m", "replace guarded source"], { cwd: root });
+    await expect(exec(process.execPath, [cli, "critical-gate", "--base", "HEAD~1", "--root", root])).rejects.toMatchObject({ code: 2 });
   }, 30_000);
 
   it("manages feature overrides and detects edited graph documents", async () => {
@@ -708,8 +1136,11 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await expect(exec(process.execPath, [cli, "check", "--ci", "--root", root])).rejects.toMatchObject({ code: 1 });
     await exec(process.execPath, [cli, "sync", "--root", root]);
     expect((await exec(process.execPath, [cli, "check", "--ci", "--root", root])).stdout).toContain("no drift detected");
+    await writeFile(join(root, ".harnessme", "features", "owner-notes.md"), "# Maintainer notes\n");
     await exec(process.execPath, [cli, "feature", "remove", "sessions", "--root", root]);
     const updated = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }> };
     expect(updated.nodes.some((node) => node.id === "feature:sessions")).toBe(false);
+    await expect(access(join(root, ".harnessme", "features", "sessions.md"))).rejects.toThrow();
+    expect(await readFile(join(root, ".harnessme", "features", "owner-notes.md"), "utf8")).toBe("# Maintainer notes\n");
   }, 30_000);
 });

@@ -43,12 +43,15 @@ export default defineCommand({
         paths,
         includedPaths: paths,
         source: typeof args.base === "string" ? "head" : "staged",
+        base: typeof args.base === "string" ? args.base : undefined,
       });
     if (!result.failures.length) return info(`Critical gate passed for ${paths.length} path(s).`);
     for (const failure of result.failures) {
       process.stderr.write(`blocked: ${failure.path}: ${failure.reason}\n`);
       if (failure.code === "approval-required") {
         process.stderr.write(`Create a record with: harnessme critical draft "${failure.path}" --summary "<summary>"\n`);
+      } else if (failure.code === "missing-gate") {
+        process.stderr.write("Restore the directive-derived gate with: harnessme refresh\n");
       } else if (failure.code !== "confirmation-required") {
         process.stderr.write("Stage the approved record, .harnessme/CRITICAL.md, and .harnessme/critical.json with the code change.\n");
       }

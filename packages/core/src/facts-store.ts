@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { z } from "zod";
+import { isTestPath } from "./risk.js";
 import {
   ConventionsSchema,
   CriticalPathsSchema,
@@ -115,7 +116,7 @@ export async function readFacts(root: string): Promise<FactsSnapshot> {
     structure: await exists(structurePath) ? await readJson(structurePath, RepositoryStructureSchema) : {
       schemaVersion: 1 as const,
       generatedAt: fallbackGeneratedAt,
-      files: (stack.sourcePaths ?? []).map((path) => ({ path, kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const })),
+      files: (stack.sourcePaths ?? []).map((path) => ({ path, kind: isTestPath(path) ? "test" as const : "source" as const })),
       imports: [],
       documents: stack.documentationPaths ?? [],
     },

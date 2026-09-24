@@ -6,7 +6,13 @@ export interface GitResult {
   stderr: string;
 }
 
-export function runGit(root: string, args: string[]): Promise<GitResult> {
+export interface GitBytesResult {
+  code: number;
+  stdout: Buffer;
+  stderr: string;
+}
+
+export function runGitBytes(root: string, args: string[]): Promise<GitBytesResult> {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd: root,
@@ -14,15 +20,19 @@ export function runGit(root: string, args: string[]): Promise<GitResult> {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    let stdout = "";
+    const stdout: Buffer[] = [];
     let stderr = "";
-    child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stdout.on("data", (chunk: Buffer) => { stdout.push(chunk); });
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.on("close", (code) => resolve({ code: code ?? 1, stdout: Buffer.concat(stdout), stderr }));
   });
+}
+
+export async function runGit(root: string, args: string[]): Promise<GitResult> {
+  const result = await runGitBytes(root, args);
+  return { code: result.code, stdout: result.stdout.toString("utf8"), stderr: result.stderr };
 }
 
 export async function gitText(root: string, args: string[], description: string): Promise<string> {

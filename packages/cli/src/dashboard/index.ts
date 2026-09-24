@@ -325,10 +325,11 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         if (!remediation) return undefined;
         if (remediation.workflow === "gates") {
           const gatePlan = await manageGates(root);
-          if (!gatePlan || (!gatePlan.activate.length && !gatePlan.remove.length && !gatePlan.add)) return undefined;
+          if (!gatePlan || (!gatePlan.activate.length && !gatePlan.remove.length && !gatePlan.dismiss.length && !gatePlan.add)) return undefined;
           const operation: Operation = async (onOutput) => {
-            for (const glob of gatePlan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
-            for (const glob of gatePlan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+            for (const glob of gatePlan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
+            for (const glob of gatePlan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
+            for (const glob of gatePlan.dismiss) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
             if (gatePlan.add) await runDashboardCommand(root, addCriticalCommand, gatePlan.add, onOutput);
           };
           return withQualityVerification(root, remediation, operation);
@@ -344,10 +345,11 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
       } },
       { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
         const plan = await manageGates(root);
-        if (!plan || (!plan.activate.length && !plan.remove.length && !plan.add)) return undefined;
+        if (!plan || (!plan.activate.length && !plan.remove.length && !plan.dismiss.length && !plan.add)) return undefined;
         return async (onOutput) => {
-          for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob }, onOutput);
-          for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob }, onOutput);
+          for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
+          for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
+          for (const glob of plan.dismiss) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
           if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
         };
       } },

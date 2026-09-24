@@ -15,3 +15,4 @@ export * from "./knowledge-graph.js";
 export * from "./graph-query.js";
 export * from "./change-context.js";
 export * from "./preflight.js";
+export * from "./directives.js";

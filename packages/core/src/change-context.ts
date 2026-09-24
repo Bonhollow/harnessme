@@ -37,6 +37,14 @@ function uniqueNodes(nodes: Array<KnowledgeNode | undefined>, limit = 20): Knowl
     .sort((left, right) => left.id.localeCompare(right.id)).slice(0, limit);
 }
 
+function uniqueGuides(nodes: Array<KnowledgeNode | undefined>, limit = 12): KnowledgeNode[] {
+  const rank = (path?: string): number => path?.startsWith(".harnessme/features/") ? 0
+    : path?.startsWith(".agents/") ? 1
+      : path?.startsWith(".harnessme/references/") ? 2 : 3;
+  return uniqueNodes(nodes, 100).sort((left, right) => rank(left.path) - rank(right.path)
+    || (left.path ?? "").localeCompare(right.path ?? "")).slice(0, limit);
+}
+
 function safePath(value: string): string {
   const path = posixPath(value.trim()).replace(/^\.\//u, "");
   if (!path || path.startsWith("/") || /^[A-Za-z]:\//u.test(path) || path.split("/").includes("..")) {
@@ -88,7 +96,10 @@ export function resolveChangeContext(facts: FactsSnapshot, requestedPaths: strin
     if (!semanticOwners.length) warnings.push(`${path} is not assigned to a feature or concern.`);
 
     const ownerEdges = owners.flatMap((owner) => edgesFrom.get(owner.id) ?? []);
-    const guides = uniqueNodes(ownerEdges.filter((edge) => edge.kind === "documented-by").map((edge) => byId.get(edge.to)), 8);
+    const guides = uniqueGuides([
+      ...ownerEdges.filter((edge) => edge.kind === "documented-by").map((edge) => byId.get(edge.to)),
+      ...(edgesFrom.get(target.id) ?? []).filter((edge) => edge.kind === "documented-by").map((edge) => byId.get(edge.to)),
+    ]);
     guidesByTarget.set(path, guides);
     guideNodes.push(...guides);
     if (!guides.length) warnings.push(`${path} has no graph-linked guide.`);
@@ -123,7 +134,7 @@ export function resolveChangeContext(facts: FactsSnapshot, requestedPaths: strin
     if (paths.includes(conflict.implementationPath ?? "") || paths.includes(conflict.reference)) warnings.push(`Documentation conflict in ${conflict.document}:${conflict.line}: ${conflict.message}`);
   }
   const owners = uniqueNodes(ownerNodes, 12);
-  const guides = uniqueNodes(guideNodes, 12);
+  const guides = uniqueGuides(guideNodes);
   const tests = uniqueNodes(testNodes, 16);
   return {
     targets: paths.map((path, index) => ({

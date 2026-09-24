@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { defineCommand } from "citty";
-import { FeatureOverridesSchema, findGraphPath, harnessDir, posixPath, readFacts, resolveGraphNode, writeYaml } from "@harnessme/core";
+import { FeatureOverridesSchema, findGraphPath, harnessDir, isTestPath, posixPath, readFacts, resolveGraphNode, writeYaml } from "@harnessme/core";
 import { syncHarness } from "@harnessme/renderers";
 import { info } from "../output.js";
 import { projectRoot } from "../project.js";
@@ -25,7 +25,7 @@ async function update(root: string, mutate: (overrides: ReturnType<typeof Featur
   try {
     // Validate the complete merged graph before changing the maintainer-owned file.
     const { createKnowledgeArtifacts, defaultFeaturePack } = await import("@harnessme/core");
-    const structure = facts.structure ?? { schemaVersion: 1 as const, generatedAt: facts.stack.generatedAt, files: (facts.stack.sourcePaths ?? []).map((path) => ({ path, kind: /(?:^|\/)(?:__tests__|tests?|spec)(?:\/|$)|(?:\.|_)(?:test|spec)\.[^.]+$/iu.test(path) ? "test" as const : "source" as const })), imports: [], documents: facts.stack.documentationPaths ?? [] };
+    const structure = facts.structure ?? { schemaVersion: 1 as const, generatedAt: facts.stack.generatedAt, files: (facts.stack.sourcePaths ?? []).map((path) => ({ path, kind: isTestPath(path) ? "test" as const : "source" as const })), imports: [], documents: facts.stack.documentationPaths ?? [] };
     createKnowledgeArtifacts({ structure, features: facts.featurePack ?? defaultFeaturePack(structure.generatedAt), references: facts.referencePack, criticalPaths: facts.criticalPaths, overrides, referenceProvenance: facts.generation?.status === "ai-reviewed" ? "ai-reviewed" : "deterministic" });
     await writeYaml(join(harnessDir(root), "feature-overrides.yaml"), overrides);
     await syncHarness(root);

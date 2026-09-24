@@ -1,10 +1,9 @@
 import { isAbsolute, join, relative } from "node:path";
 import {
   atomicWrite,
+  evaluateCriticalGate,
   exists,
-  findCriticalMatches,
   posixPath,
-  readCriticalPaths,
   readText,
   renderSharedGovernance,
   type CriticalMatch,
@@ -46,7 +45,16 @@ export function renderClaudeConfirmation(matches: CriticalMatch[]): string | und
 
 export async function evaluateClaudeHook(root: string, input: unknown): Promise<string | undefined> {
   const paths = parseClaudeHookPaths(input, root);
-  return renderClaudeConfirmation(findCriticalMatches(await readCriticalPaths(root), paths));
+  const result = await evaluateCriticalGate(root, { phase: "edit", paths });
+  const missing = result.failures.filter((failure) => failure.code === "missing-gate");
+  if (missing.length) return `${JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `HarnessME must restore directive-derived gates before editing: ${missing.map((failure) => failure.path).join(", ")}. Run harnessme refresh.`,
+    },
+  })}\n`;
+  return renderClaudeConfirmation(result.critical);
 }
 
 async function renderClaudeHook(root: string): Promise<string> {

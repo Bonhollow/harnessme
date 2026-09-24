@@ -15,3 +15,4 @@ export {
 } from "./harness-author.js";
 export * from "./documentation.js";
 export * from "./critical-candidates.js";
+export * from "./protected-candidates.js";

@@ -19,6 +19,7 @@ function referenceDirectory(scope: string): string | undefined {
 
 function referenceDirectories(facts: FactsSnapshot, reference: ReferenceDocument): string[] {
   const sourcePaths = new Set(facts.stack.sourcePaths ?? []);
+  const documentationPaths = new Set(facts.stack.documentationPaths ?? []);
   const citedPaths = [...reference.markdown.matchAll(/`([^`]+)`/gu)]
     .map((match) => match[1]?.replace(/:\d+$/u, ""))
     .filter((path): path is string => Boolean(path && sourcePaths.has(path)));
@@ -26,7 +27,9 @@ function referenceDirectories(facts: FactsSnapshot, reference: ReferenceDocument
   for (const scope of referenceScopes(reference)) {
     const scoped = referenceDirectory(scope);
     if (scoped) {
-      const scopedDirectory = sourcePaths.has(scoped) ? guidanceDirectory(scoped) : scoped;
+      const scopedDirectory = sourcePaths.has(scoped)
+        ? guidanceDirectory(scoped)
+        : documentationPaths.has(scoped) ? scoped.slice(0, scoped.lastIndexOf("/")) : scoped;
       if (scopedDirectory) directories.add(scopedDirectory);
     }
   }

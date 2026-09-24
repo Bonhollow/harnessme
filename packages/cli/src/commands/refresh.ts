@@ -1,10 +1,12 @@
 import { unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { defineCommand } from "citty";
+import { minimatch } from "minimatch";
 import {
   assessHarnessQuality,
   atomicWrite,
   classifyRisk,
+  isTestPath,
   exists,
   harnessDir,
   readFacts,
@@ -13,17 +15,39 @@ import {
   writeJson,
   writeYaml,
   type FactsSnapshot,
+  type FeatureDefinition,
+  type RepositoryStructure,
   createKnowledgeArtifacts,
   defaultFeatureOverrides,
   defaultFeaturePack,
 } from "@harnessme/core";
-import { analyzeProject, authorHarnessWithAi, criticalCandidates } from "@harnessme/analyzers";
+import { analyzeProject, authorHarnessWithAi, criticalCandidates, protectedEntryCandidates } from "@harnessme/analyzers";
 import { referenceDocuments, renderAgentsMd, syncHarness } from "@harnessme/renderers";
 import { createProgress, info, warn } from "../output.js";
 import { projectRoot } from "../project.js";
 
 async function removeIfPresent(path: string): Promise<void> {
   if (await exists(path)) await unlink(path);
+}
+
+function retainedFeature(feature: FeatureDefinition, before: RepositoryStructure, after: RepositoryStructure): boolean {
+  const inScope = (path: string): boolean => feature.scopes.some((scope) =>
+    path === scope.replace(/\/$/u, "") || minimatch(path, scope.endsWith("/") ? `${scope}**` : scope, { dot: true }));
+  const source = (structure: RepositoryStructure) => structure.files.filter((file) => file.kind === "source" && inScope(file.path))
+    .map((file) => `${file.path}:${file.sha256 ?? ""}`).sort();
+  const oldSource = source(before);
+  const newSource = source(after);
+  if (!oldSource.length || oldSource.length !== newSource.length
+    || oldSource.some((entry, index) => !entry.split(":").at(-1) || entry !== newSource[index])) return false;
+  const oldFiles = new Map(before.files.map((file) => [file.path, file.sha256]));
+  const newFiles = new Map(after.files.map((file) => [file.path, file.sha256]));
+  const stableCitation = (path: string): boolean => {
+    const oldHash = oldFiles.get(path) ?? before.documentDigests?.[path];
+    const newHash = newFiles.get(path) ?? after.documentDigests?.[path];
+    return Boolean(oldHash && oldHash === newHash);
+  };
+  return feature.citations.every((citation) => stableCitation(citation.path))
+    && feature.relationships.every((relation) => relation.citations.every((citation) => stableCitation(citation.path)));
 }
 
 export default defineCommand({
@@ -56,22 +80,27 @@ export default defineCommand({
     for (const message of analysis.warnings) warn(message);
     progress.step("Refreshing evidence, conflicts, and risk candidates");
 
-    const refreshingWithAi = Boolean(previous.config.analysis.aiFallback && !args.deterministic);
+    const lastReview = new Map(previous.criticalPaths.reviews?.map((review) => [review.glob, review]) ?? []);
     const criticalPaths = {
       ...previous.criticalPaths,
-      paths: previous.criticalPaths.paths.filter((entry) =>
-        entry.source === "explicit"
-        || (entry.status === "active" && (!refreshingWithAi || entry.source === "heuristic"))
-      ),
+      paths: previous.criticalPaths.paths.map((entry) => {
+        const review = lastReview.get(entry.glob);
+        return review?.decision === "activate" && entry.status === "proposed"
+          ? { ...entry, status: "active" as const, reason: review.reason }
+          : entry;
+      }).filter((entry) => entry.source === "explicit" || entry.status === "active"),
     };
     const approvers = [...new Set(previous.criticalPaths.paths.flatMap((entry) => entry.approvers))];
     const defaultApprovers = approvers.length ? approvers : ["developer"];
     if (criticalPaths.heuristics.enabled) {
       for (const candidate of analysis.hotspots.filter((item) =>
-        item.changes >= criticalPaths.heuristics.minChanges
-        || item.fanIn >= criticalPaths.heuristics.minFanIn
-        || item.score >= criticalPaths.heuristics.minScore
+        !isTestPath(item.path) && (
+          item.changes >= criticalPaths.heuristics.minChanges
+          || item.fanIn >= criticalPaths.heuristics.minFanIn
+          || item.score >= criticalPaths.heuristics.minScore
+        )
       )) {
+        if (criticalPaths.dismissed?.includes(candidate.path)) continue;
         if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
         criticalPaths.paths.push({
           glob: candidate.path,
@@ -83,6 +112,7 @@ export default defineCommand({
         });
       }
       for (const candidate of criticalCandidates(analysis.sourceFiles)) {
+        if (criticalPaths.dismissed?.includes(candidate.path)) continue;
         if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
         criticalPaths.paths.push({
           glob: candidate.path,
@@ -93,6 +123,14 @@ export default defineCommand({
           risk: candidate.risk,
         });
       }
+    }
+    for (const candidate of await protectedEntryCandidates(root, analysis.sourceFiles, previous.directives)) {
+      criticalPaths.dismissed = criticalPaths.dismissed?.filter((path) => path !== candidate.path);
+      const existing = criticalPaths.paths.find((entry) => entry.glob === candidate.path);
+      if (existing?.source === "explicit") continue;
+      const rule = { glob: candidate.path, reason: candidate.reason, approvers: defaultApprovers, source: "explicit" as const, status: "active" as const, risk: candidate.risk };
+      if (existing) Object.assign(existing, rule);
+      else criticalPaths.paths.push(rule);
     }
     previous.config.languages = analysis.stack.languages.map((language) => language.name);
 
@@ -122,8 +160,10 @@ export default defineCommand({
         onPhase: (message) => progress.step(message),
       });
       for (const gate of authoredResult.gates) {
+        if (criticalPaths.dismissed?.includes(gate.path)) continue;
         const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
         if (existing) {
+          if (existing.status === "active") continue;
           existing.reason = gate.reason;
           existing.source = "ai-reviewed";
           existing.status = "active";
@@ -145,10 +185,36 @@ export default defineCommand({
 
     // Validate the complete candidate graph before replacing any analyzed facts.
     // This keeps stale maintainer overrides from leaving a mixed old/new snapshot.
+    const previousFiles = previous.structure?.files.map((file) => `${file.path}:${file.sha256 ?? ""}`).sort();
+    const currentFiles = analysis.structure?.files.map((file) => `${file.path}:${file.sha256 ?? ""}`).sort();
+    const previousDocuments = Object.entries(previous.structure?.documentDigests ?? {}).sort(([left], [right]) => left.localeCompare(right));
+    const currentDocuments = Object.entries(analysis.structure?.documentDigests ?? {}).sort(([left], [right]) => left.localeCompare(right));
+    const analyzedInputsUnchanged = Boolean(previousFiles && currentFiles
+      && previousFiles.length === currentFiles.length
+      && previousFiles.every((file, index) => file === currentFiles[index])
+      && previousDocuments.length === currentDocuments.length
+      && previousDocuments.every(([path, digest], index) => path === currentDocuments[index]?.[0] && digest === currentDocuments[index]?.[1]));
+    const previousFeatures = previous.featurePack?.features ?? [];
+    const authoredFeatures = authoredResult?.features ?? [];
+    const selectedFeatures = analyzedInputsUnchanged && previousFeatures.length > authoredFeatures.length
+      ? previousFeatures
+      : [
+        ...authoredFeatures,
+        ...previousFeatures.filter((feature) => analysis.structure && previous.structure
+          && !authoredFeatures.some((current) => current.slug === feature.slug)
+          && retainedFeature(feature, previous.structure, analysis.structure)),
+      ].slice(0, 20);
+    const selectedSlugs = new Set(selectedFeatures.map((feature) => feature.slug));
+    const validatedFeatures = selectedFeatures.map((feature) => ({
+      ...feature,
+      relationships: feature.relationships.filter((relation) => selectedSlugs.has(relation.to)),
+    }));
+    const droppedFeatures = previousFeatures.filter((feature) => !selectedSlugs.has(feature.slug));
+    if (droppedFeatures.length) warn(`Dropped ${droppedFeatures.length} feature definition(s) without matching replacements; review navigation coverage: ${droppedFeatures.map((feature) => feature.slug).join(", ")}`);
     const candidateFeaturePack = {
       schemaVersion: 1 as const,
       generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
-      features: authoredResult?.features ?? [],
+      features: validatedFeatures,
     };
     if (analysis.structure) {
       const candidateSnapshot: FactsSnapshot = {
@@ -190,7 +256,7 @@ export default defineCommand({
       await writeJson(join(base, "facts", "features.json"), {
         schemaVersion: 1,
         generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
-        features: authoredResult.features,
+        features: validatedFeatures,
       });
       await writeJson(join(base, "facts", "harness-generation.json"), {
         status: "ai-reviewed",
@@ -209,7 +275,7 @@ export default defineCommand({
       await writeJson(join(base, "facts", "features.json"), {
         schemaVersion: 1,
         generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
-        features: [],
+        features: validatedFeatures,
       });
       await writeJson(join(base, "facts", "harness-generation.json"), {
         status: "deterministic",
@@ -219,7 +285,7 @@ export default defineCommand({
     }
 
     let refreshed = await readFacts(root);
-    if (!refreshed.referencePack) {
+    if (!refreshed.referencePack?.documents.length) {
       await writeJson(join(base, "facts", "references.json"), {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),

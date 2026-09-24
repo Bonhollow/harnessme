@@ -79,12 +79,17 @@ function sourceSignals(source: string, pattern: RegExp): Array<{ line: number; e
   return signals;
 }
 
-function importSpecifiers(source: string, grammar: string): Array<{ specifier: string; line: number; excerpt: string }> {
+function importSpecifiers(source: string, grammar: string, root: Node): Array<{ specifier: string; line: number; excerpt: string }> {
   const imports = new Map<string, { specifier: string; line: number; excerpt: string }>();
-  const pattern = grammar === "python"
-    ? /^\s*(?:from\s+([.\w]+)\s+import|import\s+([.\w]+))/gmu
-    : grammar === "cpp"
-      ? /^\s*#include\s*["<]([^">]+)[">]/gmu
+  if (grammar === "python") {
+    for (const node of root.descendantsOfType(["import_statement", "import_from_statement"])) {
+      const value = node.text.match(/^\s*(?:from\s+([.\w]+)\s+import|import\s+([.\w]+))/u)?.slice(1).find(Boolean);
+      if (value && !imports.has(value)) imports.set(value, { specifier: value, line: node.startPosition.row + 1, excerpt: excerpt(node) });
+    }
+    return [...imports.values()];
+  }
+  const pattern = grammar === "cpp"
+    ? /^\s*#include\s*["<]([^">]+)[">]/gmu
       : grammar === "rust"
         ? /^\s*use\s+([^;{]+)/gmu
         : grammar === "ruby"
@@ -141,7 +146,7 @@ export async function analyzeAst(path: string): Promise<AstSignals | undefined> 
       })),
       classes: classes.length,
       inheritedClasses: inherited,
-      imports: importSpecifiers(source, grammar),
+      imports: importSpecifiers(source, grammar, root),
       testCalls: calls
         .filter((node) => /^(describe|it|test|expect|pytest\.)/u.test(node.text.trim()))
         .slice(0, 3)

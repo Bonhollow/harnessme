@@ -1,6 +1,5 @@
 import { defineCommand } from "citty";
-import { join } from "node:path";
-import { assessHarnessQuality, planQualityRemediations, readFacts, readQualityHistory, readText, summarizeQualityHistory } from "@harnessme/core";
+import { assessHarnessQuality, planQualityRemediations, readFacts, readOperatingContract, readQualityHistory, summarizeQualityHistory } from "@harnessme/core";
 import { info } from "../output.js";
 import { projectRoot } from "../project.js";
 
@@ -10,7 +9,7 @@ export default defineCommand({
   async run({ args }) {
     const root = projectRoot(args.root);
     const facts = await readFacts(root);
-    const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readText(join(root, "AGENTS.md")));
+    const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readOperatingContract(root));
     const passed = quality.checks.filter((check) => check.passed).length;
     info(`Harness quality: ${quality.score}/100 · ${quality.grade} · confidence ${quality.confidence}% · ${passed}/${quality.checks.length} checks at target`);
     const trend = summarizeQualityHistory(await readQualityHistory(root));

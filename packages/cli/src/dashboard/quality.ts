@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import { assessHarnessQuality, readFacts, readQualityHistory, readText, summarizeQualityHistory, type HarnessQuality, type QualityHistory, type QualityTrend } from "@harnessme/core";
+import { assessHarnessQuality, readFacts, readOperatingContract, readQualityHistory, summarizeQualityHistory, type HarnessQuality, type QualityHistory, type QualityTrend } from "@harnessme/core";
 
 export interface QualityReport {
   quality: HarnessQuality;
@@ -16,7 +15,7 @@ export async function loadQualityReport(root: string): Promise<QualityReport> {
   const quality = assessHarnessQuality(
     facts,
     facts.documentationConflicts ?? [],
-    await readText(join(root, "AGENTS.md")),
+    await readOperatingContract(root),
   );
   const history = await readQualityHistory(root);
   return {

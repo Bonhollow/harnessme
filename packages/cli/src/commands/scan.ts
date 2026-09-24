@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import { join } from "node:path";
 import { createKnowledgeArtifacts, defaultFeatureOverrides, defaultFeaturePack, detectDrift, exists, harnessWorkflowContent, managedHarnessWorkflowPath, matchingCriticalPath, readFacts, readText } from "@harnessme/core";
 import { analyzeProject, protectedEntryCandidates } from "@harnessme/analyzers";
-import { extractPending, GENERATED_MARKER, nestedAgentDocuments, referenceDocuments, renderAgentsMd } from "@harnessme/renderers";
+import { agentPackDocuments, extractPending, GENERATED_MARKER, nestedAgentDocuments, referenceDocuments, renderEntrypointMd } from "@harnessme/renderers";
 import { createProgress, info, warn } from "../output.js";
 import { projectRoot } from "../project.js";
 
@@ -33,7 +33,7 @@ export async function scan(root: string, onPhase?: (message: string) => void): P
   }
   const agentsPath = join(root, "AGENTS.md");
   const agents = await exists(agentsPath) ? await readText(agentsPath) : undefined;
-  if (!agents || !agents.startsWith(GENERATED_MARKER) || agents !== renderAgentsMd(facts, extractPending(agents))) {
+  if (!agents || !agents.startsWith(GENERATED_MARKER) || agents !== renderEntrypointMd(facts, extractPending(agents))) {
     drift.push({ severity: "error", category: "guidance", message: "AGENTS.md differs from canonical stored facts; run `harnessme sync`." });
   }
   const workflowPath = await managedHarnessWorkflowPath(root);
@@ -48,6 +48,12 @@ export async function scan(root: string, onPhase?: (message: string) => void): P
     const expected = `${GENERATED_MARKER}\n${reference.markdown.trim()}\n`;
     if (!await exists(join(root, path)) || await readText(join(root, path)) !== expected) {
       drift.push({ severity: "error", category: "guidance", message: `${path} differs from canonical stored facts; run \`harnessme sync\`.` });
+    }
+  }
+  for (const document of agentPackDocuments(facts, references)) {
+    const expected = `${GENERATED_MARKER}\n${document.markdown.trim()}\n`;
+    if (!await exists(join(root, document.path)) || await readText(join(root, document.path)) !== expected) {
+      drift.push({ severity: "error", category: "guidance", message: `${document.path} differs from canonical stored facts; run \`harnessme sync\`.` });
     }
   }
   if (facts.structure && facts.referencePack) {

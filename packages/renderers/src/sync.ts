@@ -15,7 +15,7 @@ import {
   GENERATED_FEATURE_MARKER,
 } from "@harnessme/core";
 import { isTestPath } from "../../core/src/risk.js";
-import { GENERATED_MARKER, extractPending, renderAgentsMd } from "./agents-md.js";
+import { GENERATED_MARKER, extractPending, renderEntrypointMd } from "./agents-md.js";
 import { resolveProviders } from "./providers.js";
 import { applyRuler } from "./ruler.js";
 import { renderGovernance } from "./governance.js";
@@ -80,7 +80,7 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
     }
     await unlink(agentsPath);
   }
-  const content = renderAgentsMd(facts, pending);
+  const content = renderEntrypointMd(facts, pending);
   const rulerDir = join(root, ".ruler");
   await mkdir(rulerDir, { recursive: true });
   const rulerAgentsPath = join(rulerDir, "AGENTS.md");

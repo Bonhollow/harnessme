@@ -12,6 +12,7 @@ import {
   posixPath,
   readCriticalPaths,
   readFacts,
+  readOperatingContract,
   readText,
   readYaml,
   recordQualitySnapshot,
@@ -36,7 +37,7 @@ function safeProjectRelative(root: string, value: string): string { return repos
 
 async function recordGateQuality(root: string): Promise<void> {
   const facts = await readFacts(root);
-  const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readText(join(root, "AGENTS.md")));
+  const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readOperatingContract(root));
   await recordQualitySnapshot(root, quality, "gate-review");
 }
 

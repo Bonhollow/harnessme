@@ -57,6 +57,12 @@ export interface FactsSnapshot {
 
 export const harnessDir = (root: string): string => join(root, ".harnessme");
 
+/** Read the detailed contract, falling back to the root file until an older harness is synchronized. */
+export async function readOperatingContract(root: string): Promise<string> {
+  const detailed = join(harnessDir(root), "agent-pack", "contract.md");
+  return readText(await exists(detailed) ? detailed : join(root, "AGENTS.md"));
+}
+
 export async function writeFacts(
   root: string,
   data: Pick<FactsSnapshot, "conventions" | "stack" | "evidence" | "architecture"> & { structure?: RepositoryStructure;

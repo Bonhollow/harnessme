@@ -1,5 +1,7 @@
 import type { FactsSnapshot, ReferenceDocument } from "@harnessme/core";
 import { isTestPath } from "../../../core/src/risk.js";
+import { protectedMethodsFromDirectives } from "../../../core/src/directives.js";
+import { GENERATED_MARKER, renderAgentsMd } from "../agents-md.js";
 import { referenceScopes } from "./scopes.js";
 
 export interface AgentPackDocument {
@@ -21,8 +23,51 @@ export function agentPackDocuments(facts: FactsSnapshot, references: ReferenceDo
     ? references.map((reference) => `- [${reference.title}](../references/${reference.slug}.md) — applies to ${referenceScopes(reference).map((scope) => `\`${scope}\``).join(", ")}.`).join("\n")
     : "- No focused reference guide was generated; use the root contract and local instructions.";
   const activeGates = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
+  const protectedMethods = protectedMethodsFromDirectives(facts.directives);
+  const maintenanceMap = references.map((reference) => {
+    const triggers = reference.markdown.match(/^## Maintenance triggers\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/mu)?.[1]?.trim();
+    const firstTrigger = triggers?.split("\n").map((line) => line.trim()).find((line) => line && !line.startsWith("#"));
+    return `- [${reference.title}](../references/${reference.slug}.md): ${firstTrigger?.replace(/^[-*]\s+/u, "") ?? "Update when this concern's canonical behavior or extension seam changes."}`;
+  }).join("\n");
   const testPaths = (facts.stack.sourcePaths ?? []).filter(isTestPath).slice(0, 24);
   return [
+    {
+      path: ".harnessme/agent-pack/agent.md",
+      markdown: `# Repository agent contract
+
+This is the canonical generated guide for changing this repository. The root \`AGENTS.md\` carries maintainer directives and the active safety gate; those directives take precedence over generated guidance. Read the [detailed operating contract](contract.md) only when the task needs its module map, change recipes, or evidence.
+
+## First steps
+
+1. Read the root \`AGENTS.md\` and any closer scoped \`AGENTS.md\` for the files you will change.
+2. Find the owning feature in [FEATURES.md](../FEATURES.md), then read only the relevant guide below. Use \`harnessme context <path>\` for a bounded owner, dependency, and test packet.
+3. Inspect the current implementation, its callers, and focused tests before editing. Source code and tests resolve any conflict with generated descriptions.
+
+## Task reference map
+
+${referenceMap}
+
+## Protected boundaries
+
+${protectedMethods.length ? `Maintainer directives protect these named methods: ${protectedMethods.map((method) => `\`${method}\``).join(", ")}. Follow their exact approval requirement before editing.` : "No named protected method was found in the maintainer directives."}
+
+${activeGates.length ? `Active path gates are linked from the root \`AGENTS.md\` and listed in [CRITICAL.md](../CRITICAL.md). Follow the [critical change audit](critical-change-audit.md) after explicit approval.` : "Review the root directives and proposed critical paths before changing a shared contract."}
+
+## Updating this agent pack
+
+When a change establishes or alters a canonical workflow, invariant, extension seam, or validation rule, update the matching guide in the same change. If tool-specific loading behavior changes, update that adapter too. Keep this index short and put task details in focused references.
+
+${maintenanceMap || "- No focused references were generated. Update the root instructions when the repository's operating contract changes."}
+`,
+    },
+    {
+      path: ".harnessme/agent-pack/contract.md",
+      markdown: renderAgentsMd(facts)
+        .replace(`${GENERATED_MARKER}\n`, "")
+        .replace(/\]\(\.harnessme\//gu, "](../")
+        .replace(/<!-- HARNESSME:PENDING:START -->[\s\S]*?<!-- HARNESSME:PENDING:END -->/u,
+          "Add pending notes to the root `AGENTS.md`; `harnessme validate` reads them there."),
+    },
     {
       path: ".harnessme/agent-pack/architecture.md",
       markdown: `# Architecture and change map

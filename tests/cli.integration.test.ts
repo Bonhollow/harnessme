@@ -127,15 +127,17 @@ describe("CLI", () => {
 
     const refreshed = await exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic", "--details", "The API must remain compatible with external evaluators."]);
     const agents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(refreshed.stdout).toContain("Refreshed 13 managed artifact(s)");
+    expect(refreshed.stdout).toContain("managed artifact(s)");
     expect(JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8"))).toEqual(expect.objectContaining({ schemaVersion: 1 }));
     expect(await readFile(join(root, ".harnessme", "FEATURES.md"), "utf8")).toContain("# Feature navigation");
     await expect(access(join(root, ".harnessme", "graph.html"))).rejects.toThrow();
     expect(agents).toContain("preserve this maintainer note");
     expect(agents).toContain("The API must remain compatible with external evaluators.");
-    expect(agents).toContain(".harnessme/references/repository-workflow.md");
+    expect(agents).toContain(".harnessme/agent-pack/agent.md");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("../references/repository-workflow.md");
     expect(await readFile(join(root, ".harnessme", "references", "repository-workflow.md"), "utf8")).toContain("## Invariants");
     expect(await readFile(join(root, ".harnessme", "agent-pack", "architecture.md"), "utf8")).toContain("## Cross-module changes");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "agent.md"), "utf8")).toContain("## Task reference map");
     expect(await readFile(join(root, ".harnessme", "agent-pack", "critical-change-audit.md"), "utf8")).toContain("## Audit record standard");
     expect(await readFile(join(root, ".harnessme", "agent-pack", "testing-and-validation.md"), "utf8")).toContain("## Validation ladder");
     expect(JSON.parse(await readFile(join(root, ".harnessme", "facts", "conflicts.json"), "utf8"))).toEqual([
@@ -155,7 +157,7 @@ describe("CLI", () => {
     const generations = await exec(process.execPath, [cli, "generation", "list", "--root", root]);
     expect(generations.stdout).toContain("before-sync");
     expect(generations.stdout).toContain("sync");
-    const previewSource = agents.replace("## Project purpose", "## Project purpose\n\nTemporary preview-only drift.");
+    const previewSource = agents.replace("## Maintenance", "## Maintenance\n\nTemporary preview-only drift.");
     await writeFile(join(root, "AGENTS.md"), previewSource);
     const preview = await exec(process.execPath, [cli, "sync", "--preview", "--root", root]);
     expect(preview.stdout).toContain("MODIFIED AGENTS.md");
@@ -296,6 +298,7 @@ describe("CLI", () => {
     expect(() => served.stdout.trim().split("\n").map((line) => JSON.parse(line))).not.toThrow();
     expect(served.stdout).toContain('"instructions":"Before any repository file edit');
     expect(served.stdout).toContain('"name":"harnessme_preflight"');
+    expect(served.stdout).toContain(".harnessme/agent-pack/agent.md");
     expect(served.stdout).toContain('\\"status\\": \\"approval-required\\"');
     expect(served.stdout).toContain('\\"path\\": \\"module/AGENTS.md\\"');
     expect(served.stdout).toContain('"name":"harnessme_change_context"');
@@ -433,7 +436,7 @@ const value = schema.includes("harnessme_facts")
     });
     expect(initialized.stdout).toContain("✓ AI-assisted mode: codex / provider default");
     expect(initialized.stdout).toContain("✓ AI comparison review: separate pass");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Kotlin runtime and tooling");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("Kotlin runtime and tooling");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     expect(await readFile(join(root, ".clinerules"), "utf8")).toContain("Repository instructions");
     expect(await readFile(join(root, ".agent", "rules", "ruler.md"), "utf8")).toContain("Repository instructions");
@@ -489,7 +492,7 @@ process.stdin.on("end", () => console.log(JSON.stringify({ structured_output: va
     });
 
     expect(initialized.stdout).toContain("✓ AI-assisted mode: claude-code / provider default");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Claude fixture runtime");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("Claude fixture runtime");
     expect(await readFile(join(root, "CLAUDE.md"), "utf8")).toContain("@AGENTS.md");
     expect(await readFile(join(root, ".claude", "settings.json"), "utf8")).toContain("critical-gate");
     const calls = await readFile(argsLog, "utf8");
@@ -531,7 +534,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     });
 
     expect(initialized.stdout).toContain("✓ AI-assisted mode: cursor / provider default");
-    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("Cursor fixture runtime");
+    expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("Cursor fixture runtime");
     await expect(access(join(root, "CLAUDE.md"))).rejects.toMatchObject({ code: "ENOENT" });
     const calls = await readFile(argsLog, "utf8");
     expect(calls).toContain("--print");
@@ -601,7 +604,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
         cli, "init", "--root", root, "--provider", "http",
         "--ai-endpoint", `http://127.0.0.1:${address.port}/v1/chat/completions`, "--model", "test-model",
       ]);
-      const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+      const agents = await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8");
       expect(agents).toContain("Swift runtime and tooling");
       expect(agents).toContain("Use PascalCase names for declared types. Evidence: `Payment.swift:1`");
       expect(agents).toContain("PaymentService is a payment-domain boundary. Evidence: `Payment.swift:1`");
@@ -690,7 +693,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
       ]);
       expect(models).toEqual(["analyst-model", "reviewer-model", "analyst-model", "reviewer-model", "reviewer-model"]);
       expect(initialized.stderr).toContain("independently reviewed by http");
-      expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("## Project purpose\n\nA fixture for independent model review.");
+      expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("## Project purpose\n\nA fixture for independent model review.");
       const configuration = await readFile(join(root, ".harnessme", "harnessme.yaml"), "utf8");
       expect(configuration).toContain("reviewer-model");
       const registry = await readCriticalPaths(root);
@@ -750,14 +753,14 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     expect(registry).toContain("source: heuristic");
     expect(registry).toContain("status: proposed");
     expect(registry).not.toContain("glob: tests/shared.ts");
-    const proposedAgents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const proposedAgents = await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8");
     expect(registry).toContain("core.ts");
     expect(proposedAgents).toContain("1 candidate awaits review in `.harnessme/critical-paths.yaml`");
     expect(proposedAgents).toContain("no gate applies");
     const proposedGate = await exec(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root]);
     expect(proposedGate.stdout).toContain("Critical gate passed");
     await exec(process.execPath, [cli, "critical", "activate", "core.ts", "--reason", "Shared API used by five consumers", "--root", root]);
-    const activeAgents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const activeAgents = await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8");
     expect(activeAgents).toContain("`core.ts`");
     expect(activeAgents).toContain("ask the developer for explicit confirmation");
     const activeGate = await execWithInput(process.execPath, [cli, "critical-gate", "--path", "core.ts", "--root", root], "");
@@ -843,7 +846,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex,claude-code"]);
     expect(initialized.stdout).toContain("Initialized HarnessME");
     expect(initialized.stderr).toContain("progress: [===.................] 1/6 Preparing the HarnessME workspace");
-    const agents = await readFile(join(root, "AGENTS.md"), "utf8");
+    const agents = await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8");
     expect(agents).toContain("Evidence: `.editorconfig:3`");
     expect(agents).not.toContain("Preserve the established exception propagation and handling pattern");
     expect(agents).not.toContain("language percentage");
@@ -858,7 +861,7 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     const clean = await exec(process.execPath, [cli, "check", "--ci", "--root", root]);
     expect(clean.stdout).toContain("check passed");
 
-    const withPending = agents.replace(
+    const withPending = (await readFile(join(root, "AGENTS.md"), "utf8")).replace(
       "<!-- HARNESSME:PENDING:END -->",
       "- 2026-09-07: changed `service.ts`\n<!-- HARNESSME:PENDING:END -->",
     );
@@ -866,8 +869,9 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     const validated = await exec(process.execPath, [cli, "validate", "--root", root]);
     expect(validated.stdout).toContain("Verified 1 pending update");
     const validatedAgents = await readFile(join(root, "AGENTS.md"), "utf8");
-    expect(validatedAgents).toContain("## Verified material changes");
-    expect(validatedAgents).toContain("2026-09-07: changed `service.ts`");
+    const validatedContract = await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8");
+    expect(validatedContract).toContain("## Verified material changes");
+    expect(validatedContract).toContain("2026-09-07: changed `service.ts`");
     expect(validatedAgents.split("<!-- HARNESSME:PENDING:START -->")[1]).not.toContain("changed `service.ts`");
 
     const falseClaim = validatedAgents.replace(

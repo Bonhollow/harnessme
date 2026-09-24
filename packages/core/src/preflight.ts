@@ -55,6 +55,9 @@ export async function resolveRepositoryPreflight(
   const paths = safePaths(requestedPaths);
   if (!paths.length) throw new Error("At least one repository path is required for preflight.");
   const documentPaths = new Set(["AGENTS.md", ".harnessme/CRITICAL.md"]);
+  if (await exists(join(root, ".harnessme/agent-pack/agent.md"))) {
+    documentPaths.add(".harnessme/agent-pack/agent.md");
+  }
   for (const path of paths) {
     const scoped = await nearestModuleInstructions(root, path);
     if (scoped) documentPaths.add(scoped);

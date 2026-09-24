@@ -13,6 +13,7 @@ import {
   matchingCriticalPath,
   readCriticalPaths,
   readFacts,
+  readOperatingContract,
   readText,
   resolveChangeContext,
   resolveRepositoryPreflight,
@@ -80,7 +81,7 @@ export function createHarnessMcpServer(root: string): McpServer {
   }, async () => {
     try {
       const facts = await readFacts(root);
-      return result(assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readText(join(root, "AGENTS.md"))));
+      return result(assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readOperatingContract(root)));
     } catch (error) { return failure(error); }
   });
 

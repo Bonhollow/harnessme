@@ -310,6 +310,7 @@ describe("harness quality benchmark", () => {
       expect.objectContaining({ directory: "src/coreval/api" }),
     ]);
     expect(agentPackDocuments(facts, references)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: ".harnessme/agent-pack/agent.md", markdown: expect.stringContaining("## Updating this agent pack") }),
       expect.objectContaining({ path: ".harnessme/agent-pack/architecture.md", markdown: expect.stringContaining("## Cross-module changes") }),
       expect.objectContaining({ path: ".harnessme/agent-pack/critical-change-audit.md", markdown: expect.stringContaining("## Audit record standard") }),
       expect.objectContaining({ path: ".harnessme/agent-pack/testing-and-validation.md", markdown: expect.stringContaining("## Validation ladder") }),

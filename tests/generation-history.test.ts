@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -57,5 +57,29 @@ describe("harness generation history", () => {
     await rollbackGeneration(root, first.id);
     expect(await readFile(join(root, "AGENTS.md"), "utf8")).toContain("version one");
     expect(await readFile(join(root, ".github", "CODEOWNERS"), "utf8")).toBe("src/** @new-owner\n");
+  });
+
+  it.skipIf(process.platform === "win32")("leaves documents and history unchanged when a restore path conflicts with a symbolic link", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-generation-conflict-"));
+    const agentsPath = join(root, "AGENTS.md");
+    const claudePath = join(root, "CLAUDE.md");
+    const externalPath = join(root, "external.md");
+    await writeFile(agentsPath, agents("version one"));
+    await writeFile(claudePath, `${GENERATED_MARKER}\nfirst Claude version\n`);
+    const first = await captureGeneration(root, "sync");
+    await writeFile(agentsPath, agents("version two"));
+    await writeFile(claudePath, `${GENERATED_MARKER}\nsecond Claude version\n`);
+    await captureGeneration(root, "sync");
+    await writeFile(externalPath, "maintainer owned\n");
+    await unlink(claudePath);
+    await symlink(externalPath, claudePath);
+    const agentsBefore = await readFile(agentsPath, "utf8");
+    const historyBefore = await listGenerations(root);
+
+    await expect(rollbackGeneration(root, first.id)).rejects.toThrow("CLAUDE.md");
+    expect(await readFile(agentsPath, "utf8")).toBe(agentsBefore);
+    expect((await lstat(claudePath)).isSymbolicLink()).toBe(true);
+    expect(await readFile(externalPath, "utf8")).toBe("maintainer owned\n");
+    expect(await listGenerations(root)).toEqual(historyBefore);
   });
 });

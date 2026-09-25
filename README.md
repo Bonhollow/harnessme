@@ -164,7 +164,7 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme sync` | Stage and validate generated files, then apply them with rollback if the update fails. | `--targets <comma-list>`, `--preview` |
 | `harnessme generation list` | List the latest local generated-document snapshots. | — |
 | `harnessme generation preview` | Render in an isolated temporary workspace and show the pending file-level diff. | `--targets <comma-list>` |
-| `harnessme generation rollback [id]` | Restore a generated-document snapshot, defaulting to the previous generation. | `--preview` shows the rollback diff without writing. |
+| `harnessme generation rollback [id]` | Stage a generated-document snapshot and its history update before restoring them, defaulting to the previous generation. | `--preview` shows the rollback diff without writing. |
 | `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
 | `harnessme validate` | Verify pending notes and stage the fact and generated-file refresh before applying it. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail when stored facts, analyzed source or document contents, or generated guidance have drifted. | `--ci` |

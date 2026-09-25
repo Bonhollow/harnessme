@@ -27,7 +27,7 @@ function grade(score: number): HarnessQuality["grade"] {
   return "critical";
 }
 
-export function assessHarnessQuality(facts: FactsSnapshot, conflicts: DocumentationConflict[] = [], renderedMarkdown?: string): HarnessQuality {
+export function assessHarnessQuality(facts: FactsSnapshot, conflicts: DocumentationConflict[] = [], renderedMarkdown?: string, brokenGuidanceLinks = 0): HarnessQuality {
   const markdown = renderedMarkdown ?? facts.authoredInstructions ?? "";
   const structureFiles = facts.structure?.files ?? [];
   const fileNodes = facts.knowledgeGraph?.nodes.filter((node) => node.kind === "file" || node.kind === "test") ?? [];
@@ -96,7 +96,8 @@ export function assessHarnessQuality(facts: FactsSnapshot, conflicts: Documentat
     { id: "core-boundaries", dimension: "operations", points: 5, ratio: concreteCore ? 1 : 0, message: concreteCore ? "Concrete core boundaries are identified by path." : "No concrete core boundary is identified.", action: "Name high-impact files or directories and their invariants." },
     { id: "workflow-depth", dimension: "operations", points: 6, ratio: Math.min(ratio(workflowItems, 2), workflowGrounded ? 1 : 0), message: `${workflowItems} workflow steps found; path grounding is ${workflowGrounded ? "present" : "missing"}.`, action: "Add at least two path-grounded change workflows." },
     { id: "documentation-discovery", dimension: "documentation", points: 3, ratio: facts.stack.documentationPaths?.length ? 1 : 0, message: `${facts.stack.documentationPaths?.length ?? 0} repository documents are discoverable.`, action: "Route agents to task-relevant repository documentation." },
-    { id: "reference-depth", dimension: "documentation", points: 7, ratio: ratio(deepReferences, Math.max(1, references.length)), message: `${deepReferences}/${references.length} scoped guides satisfy the deep-guide contract.`, action: "Add extension seams, invariants, impact, anti-patterns, validation, and maintenance triggers." },
+    { id: "reference-depth", dimension: "documentation", points: 5, ratio: ratio(deepReferences, Math.max(1, references.length)), message: `${deepReferences}/${references.length} scoped guides satisfy the deep-guide contract.`, action: "Add extension seams, invariants, impact, anti-patterns, validation, and maintenance triggers." },
+    { id: "guidance-link-integrity", dimension: "documentation", points: 2, ratio: brokenGuidanceLinks ? 0 : 1, message: brokenGuidanceLinks ? `${brokenGuidanceLinks} generated guidance link(s) are broken.` : "Generated guidance links resolve.", action: "Repair missing generated guidance targets and rerun harnessme check." },
     { id: "documentation-consistency", dimension: "documentation", points: 5, ratio: conflicts.length ? Math.max(0, 1 - conflicts.length * 0.25) : 1, message: conflicts.length ? `${conflicts.length} documentation/code conflicts remain.` : "No documentation/code conflicts were detected.", action: "Reconcile documentation with the implementation." },
     { id: "freshness", dimension: "governance", points: 4, ratio: freshnessRatio, message: `Graph facts are ${Math.floor(ageDays)} day(s) old.`, action: "Refresh after material architecture or contract changes." },
     { id: "graph-consistency", dimension: "governance", points: 4, ratio: graphConsistency, message: `${graphErrors} graph errors and ${graphWarnings} warnings are recorded.`, action: "Resolve graph diagnostics and orphaned-file warnings." },

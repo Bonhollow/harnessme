@@ -27,6 +27,7 @@ import {
 import {
   analyzeProject,
   authorHarnessWithAi,
+  citedScopePaths,
   criticalCandidates,
   protectedEntryCandidates,
   discoverAvailableModels,
@@ -326,6 +327,10 @@ export default defineCommand({
         await removePartialAiHarness();
         const reason = error instanceof Error ? error.message : String(error);
         throw new Error(`AI harness generation failed; no HarnessME artifacts were created: ${reason}`);
+      }
+      if (analysis.structure) {
+        analysis.structure.scopePaths = citedScopePaths(analysis, authored.features, authored.references);
+        await writeJson(join(base, "facts", "structure.json"), analysis.structure);
       }
       for (const gate of authored.gates) {
         const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);

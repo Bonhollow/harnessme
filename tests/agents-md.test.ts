@@ -93,6 +93,16 @@ describe("AGENTS.md renderer", () => {
       markdown: "# Core\n\n## Maintenance triggers\n\nUpdate this guide when the public interface changes.\n",
     }]).find((document) => document.path.endsWith("/agent.md"));
     expect(guide?.markdown).toContain("Core](../references/core.md): Update this guide when the public interface changes.");
+    facts.stack.sourcePaths = ["src/a.ts"];
+    const grounded = agentPackDocuments(facts, [{
+      slug: "auth",
+      title: "Authentication",
+      scope: "src/**",
+      description: "Auth behavior",
+      markdown: "# Authentication\n\n## Invariants\n\n- Preserve session isolation in `src/a.ts`.\n- Do not invent a rule for `src/missing.ts`.\n",
+    }]).find((document) => document.path.endsWith("/agent.md"));
+    expect(grounded?.markdown).toContain("Preserve session isolation in `src/a.ts`.");
+    expect(grounded?.markdown).not.toContain("Do not invent a rule for `src/missing.ts`.");
     const detailed = agentPackDocuments(facts, []).find((document) => document.path.endsWith("/contract.md"));
     expect(detailed?.markdown).toContain("](../FEATURES.md)");
     expect(detailed?.markdown).not.toContain("](.harnessme/FEATURES.md)");

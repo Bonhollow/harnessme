@@ -98,6 +98,12 @@ export function detectDrift(current: AnalysisResult, committed: FactsSnapshot): 
     }
   }
   if (current.structure && committed.structure) {
+    const missingScopePaths = (committed.structure.scopePaths ?? []).filter((path) => !(current.scopePaths ?? []).includes(path));
+    if (missingScopePaths.length) drift.push({
+      severity: "error",
+      category: "guidance",
+      message: `${missingScopePaths.length} cited repository path(s) are missing: ${missingScopePaths.slice(0, 5).join(", ")}. Run \`harnessme refresh\`.`,
+    });
     const oldFiles = committed.structure.files.map((item) => `${item.kind}:${item.path}`);
     const newFiles = current.structure.files.map((item) => `${item.kind}:${item.path}`);
     const currentDigests = new Map(current.structure.files.map((item) => [item.path, item.sha256]));

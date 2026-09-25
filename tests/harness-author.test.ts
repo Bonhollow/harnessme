@@ -1,10 +1,22 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FactsSnapshot } from "@harnessme/core";
-import { authorHarnessWithAi } from "../packages/analyzers/src/harness-author.js";
+import { authorHarnessWithAi, citedScopePaths } from "../packages/analyzers/src/harness-author.js";
 import type { AnalysisResult } from "../packages/analyzers/src/types.js";
 
 const servers: Array<ReturnType<typeof createServer>> = [];
+
+it("keeps a bounded set of real infrastructure paths for AI feature scopes", () => {
+  const analysis = {
+    scopePaths: ["apps/clusters/gov/a.yaml", "apps/clusters/gov/b.yaml", "apps/clusters/gov/c.yaml", "apps/clusters/gov/d.yaml", ".helmrelease-validation-ignore"],
+    structure: { files: [], documents: [] },
+  } as unknown as AnalysisResult;
+  const paths = citedScopePaths(analysis, [{
+    slug: "deploy", kind: "feature", title: "Deployment", summary: "Helm releases", scopes: ["apps/clusters/gov/**"],
+    responsibilities: [], invariants: [], validation: [], citations: [{ path: ".helmrelease-validation-ignore", line: 1 }], relationships: [],
+  }], []);
+  expect(paths).toEqual([".helmrelease-validation-ignore", "apps/clusters/gov/a.yaml", "apps/clusters/gov/b.yaml", "apps/clusters/gov/c.yaml"]);
+});
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve, reject) => {
@@ -160,6 +172,7 @@ function operationalReferences() {
 
 describe("AI harness authoring", () => {
   it("accepts feature citations to discovered repository documentation", async () => {
+    const markdownWithoutDocRoute = operationalHarnessMarkdown().replaceAll("`docs/CORE.md`", "repository documentation");
     let authorGateCandidates: Array<{ path: string }> | undefined;
     let protectedContextGaps: Array<{ path: string; linkedDocuments: Array<{ path: string; line: number }> }> | undefined;
     const feature = {
@@ -191,7 +204,7 @@ describe("AI harness authoring", () => {
         }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-          markdown: operationalHarnessMarkdown(),
+          markdown: markdownWithoutDocRoute,
           gates: [],
           references: operationalReferences(),
           features: [feature],
@@ -249,6 +262,7 @@ describe("AI harness authoring", () => {
     });
 
     expect(result.features).toEqual([{ ...feature, scopes: ["src/**"] }]);
+    expect(result.markdown).toContain("- Read `docs/CORE.md` when the task needs repository context.");
     expect(authorGateCandidates?.map((candidate) => candidate.path)).toEqual(["src/entry.ts"]);
     expect(protectedContextGaps).toEqual([{ path: "src/entry.ts", reason: "Protected entry point", linkedDocuments: [{ path: "docs/CORE.md", line: 2 }] }]);
   });

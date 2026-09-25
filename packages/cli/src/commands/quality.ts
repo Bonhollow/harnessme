@@ -2,6 +2,8 @@ import { defineCommand } from "citty";
 import { assessHarnessQuality, planQualityRemediations, readFacts, readOperatingContract, readQualityHistory, summarizeQualityHistory } from "@harnessme/core";
 import { info } from "../output.js";
 import { projectRoot } from "../project.js";
+import fg from "fast-glob";
+import { auditGuidanceLinks } from "../guidance-links.js";
 
 export default defineCommand({
   meta: { name: "quality", description: "Score the current harness and show missing operational guidance" },
@@ -9,7 +11,9 @@ export default defineCommand({
   async run({ args }) {
     const root = projectRoot(args.root);
     const facts = await readFacts(root);
-    const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readOperatingContract(root));
+    const guidancePaths = await fg(["AGENTS.md", "**/AGENTS.md", ".harnessme/agent-pack/*.md", ".harnessme/references/*.md", ".harnessme/features/*.md", ".harnessme/FEATURES.md", ".harnessme/CRITICAL.md"], { cwd: root, dot: true, ignore: ["**/node_modules/**", "**/.git/**", ".ruler/**", ".harnessme/facts/**"] });
+    const brokenLinks = await auditGuidanceLinks(root, guidancePaths);
+    const quality = assessHarnessQuality(facts, facts.documentationConflicts ?? [], await readOperatingContract(root), brokenLinks.length);
     const passed = quality.checks.filter((check) => check.passed).length;
     info(`Harness quality: ${quality.score}/100 · ${quality.grade} · confidence ${quality.confidence}% · ${passed}/${quality.checks.length} checks at target`);
     const trend = summarizeQualityHistory(await readQualityHistory(root));

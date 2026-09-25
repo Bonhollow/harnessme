@@ -253,6 +253,7 @@ export const RepositoryStructureSchema = z.object({
     excerpt: z.string().min(1),
   })),
   documents: z.array(z.string().min(1)).default([]),
+  scopePaths: z.array(z.string().min(1)).optional(),
   documentDigests: z.record(z.string().min(1), z.string().regex(/^[a-f0-9]{64}$/u)).optional(),
   documentLinks: z.array(z.object({ document: z.string().min(1), path: z.string().min(1), line: z.number().int().positive() })).optional(),
 });

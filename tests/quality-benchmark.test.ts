@@ -139,6 +139,14 @@ describe("harness quality benchmark", () => {
     expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "reference-depth", passed: false }));
   });
 
+  it("deducts guidance-link points when generated targets are missing", () => {
+    const facts = comprehensiveSnapshot();
+    const clean = assessHarnessQuality(facts);
+    const broken = assessHarnessQuality(facts, [], undefined, 1);
+    expect(broken.score).toBe(clean.score - 2);
+    expect(broken.checks).toContainEqual(expect.objectContaining({ id: "guidance-link-integrity", passed: false }));
+  });
+
   it("counts source line citations as grounded change workflows", () => {
     const facts = comprehensiveSnapshot();
     facts.authoredInstructions = facts.authoredInstructions?.replace(/`src\/core\.ts`/gu, "`src/core.ts:1`");
@@ -213,6 +221,21 @@ describe("harness quality benchmark", () => {
     }];
     const directories = nestedAgentDocuments(facts, references).map((document) => document.directory);
     expect(directories).toEqual(["mcp_graph/docs"]);
+  });
+
+  it("does not create a directory from a root-level document name", () => {
+    const facts = snapshot();
+    expect(nestedAgentDocuments(facts, [{ slug: "readme", title: "Readme", scope: "README.md", description: "Root docs", markdown: "# Readme" }])).toEqual([]);
+  });
+
+  it("places guidance for an exact deployment file in its owning directory", () => {
+    const facts = snapshot();
+    facts.structure = { schemaVersion: 1, generatedAt: facts.stack.generatedAt, files: [], imports: [], documents: [], scopePaths: ["apps/clusters/gov/helm-release.yaml"] };
+    const nested = nestedAgentDocuments(facts, [{
+      slug: "deployment", title: "Deployment", scope: "apps/clusters/gov/helm-release.yaml", description: "Deployment rules",
+      markdown: "# Deployment\n\n## Invariants\n\n- Keep `apps/clusters/gov/helm-release.yaml:1` valid.\n",
+    }]);
+    expect(nested.map((item) => item.directory)).toEqual(["apps/clusters"]);
   });
 
   it("classifies critical paths by operational risk", () => {
@@ -297,9 +320,12 @@ describe("harness quality benchmark", () => {
     expect(references.find((item) => item.title === "Persistence and idempotency")?.scopes).toEqual(["src/coreval/api/services/experiment_repository.py"]);
     expect(references.find((item) => item.title === "Authentication and security")?.markdown).toContain("`src/coreval/api/services/token_provider.py`");
     expect(nestedAgentDocuments(facts)).toEqual(expect.arrayContaining([
-      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Graph-routed context") }),
+      expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("harnessme context <path>") }),
       expect.objectContaining({ directory: "src/coreval/api", markdown: expect.stringContaining("## Change workflow") }),
     ]));
+    const apiGuide = nestedAgentDocuments(facts).find((item) => item.directory === "src/coreval/api")?.markdown ?? "";
+    expect(apiGuide.split("\n").length).toBeLessThan(50);
+    expect(apiGuide).not.toContain("## Local operating rules");
     expect(nestedAgentDocuments(facts, [{
       slug: "persistence",
       title: "Persistence",

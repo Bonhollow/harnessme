@@ -18,6 +18,25 @@ export interface AvailableModel {
   label: string;
 }
 
+export interface InferenceEvent {
+  provider: string;
+  stage: string;
+  status: "started" | "waiting" | "completed" | "failed";
+  elapsedMs: number;
+}
+
+export type InferenceObserver = (event: InferenceEvent) => void;
+
+export interface ProviderDiagnosis {
+  provider: InferenceProviderId;
+  command?: string;
+  installed: boolean;
+  authenticated: boolean;
+  models: AvailableModel[];
+  modelDiscovery: "available" | "unsupported" | "failed";
+  probe?: { ok: boolean; elapsedMs: number; error?: string };
+}
+
 interface ProcessResult { code: number | null; stdout: string; stderr: string }
 
 async function run(command: string, args: string[], cwd: string, input = "", timeoutMs = 120_000): Promise<ProcessResult> {
@@ -55,7 +74,8 @@ async function authenticated(command: string, statusArgs: string[]): Promise<boo
   try { return (await run(command, statusArgs, process.cwd(), "", 10_000)).code === 0; } catch { return false; }
 }
 
-async function cursorCommand(): Promise<string | undefined> {
+async function cursorInstalledCommands(): Promise<string[]> {
+  const commands: string[] = [];
   for (const command of ["cursor-agent", "agent"]) {
     if (command === "agent") {
       try {
@@ -63,6 +83,13 @@ async function cursorCommand(): Promise<string | undefined> {
         if (help.code !== 0 || !/Cursor Agent/iu.test(`${help.stdout}\n${help.stderr}`)) continue;
       } catch { continue; }
     }
+    if (await available(command)) commands.push(command);
+  }
+  return commands;
+}
+
+async function cursorCommand(): Promise<string | undefined> {
+  for (const command of await cursorInstalledCommands()) {
     if (await authenticated(command, ["status"])) return command;
   }
   return undefined;
@@ -253,14 +280,84 @@ function httpRuntime(config: AiReviewConfig): InferenceRuntime {
   };
 }
 
-export async function createInferenceRuntime(config: AiReviewConfig): Promise<InferenceRuntime> {
+function observed(runtime: InferenceRuntime, observer?: InferenceObserver): InferenceRuntime {
+  if (!observer) return runtime;
+  return {
+    name: runtime.name,
+    async generate(stage, schema, system, input) {
+      const started = performance.now();
+      const emit = (status: InferenceEvent["status"]): void => observer({
+        provider: runtime.name, stage, status, elapsedMs: Math.round(performance.now() - started),
+      });
+      emit("started");
+      const heartbeat = setInterval(() => emit("waiting"), 30_000);
+      heartbeat.unref();
+      try {
+        const output = await runtime.generate(stage, schema, system, input);
+        emit("completed");
+        return output;
+      } catch (error) {
+        emit("failed");
+        throw error;
+      } finally {
+        clearInterval(heartbeat);
+      }
+    },
+  };
+}
+
+export async function createInferenceRuntime(config: AiReviewConfig, observer?: InferenceObserver): Promise<InferenceRuntime> {
   const resolved = await resolveInferenceProvider(config);
-  if (resolved === "http") return httpRuntime(config);
-  if (resolved === "codex") return codexRuntime(config);
-  if (resolved === "claude-code") return claudeRuntime(config);
+  if (resolved === "http") return observed(httpRuntime(config), observer);
+  if (resolved === "codex") return observed(codexRuntime(config), observer);
+  if (resolved === "claude-code") return observed(claudeRuntime(config), observer);
   if (resolved === "cursor") {
-    return cursorRuntime(config, (await cursorCommand())!);
+    return observed(cursorRuntime(config, (await cursorCommand())!), observer);
   }
   const requested = config.provider === "auto" ? config.frameworks : [config.provider];
   throw new InferenceUnavailableError(`No authenticated inference CLI is available for: ${requested.join(", ") || "the selected providers"}. Install/login to one or use --provider=http.`);
+}
+
+export async function diagnoseInferenceProvider(
+  provider: InferenceProviderId,
+  options: { endpoint?: string; apiKeyEnv?: string; model?: string; probe?: boolean } = {},
+): Promise<ProviderDiagnosis> {
+  let command = provider === "codex" ? "codex" : provider === "claude-code" ? "claude" : provider === "cursor"
+    ? (await cursorInstalledCommands())[0] : undefined;
+  const installed = provider === "http" ? Boolean(options.endpoint) : Boolean(command && await available(command));
+  const config: AiReviewConfig = {
+    provider, frameworks: provider === "http" ? [] : [provider], endpoint: options.endpoint,
+    model: options.model, apiKeyEnv: options.apiKeyEnv ?? "",
+  };
+  const authenticated = provider === "http"
+    ? installed && (!options.apiKeyEnv || Boolean(process.env[options.apiKeyEnv]))
+    : Boolean(await resolveInferenceProvider(config));
+  if (provider === "cursor" && authenticated) command = await cursorCommand();
+  const models = authenticated ? await discoverAvailableModels(provider, options.endpoint, options.apiKeyEnv) : [];
+  const diagnosis: ProviderDiagnosis = {
+    provider, command, installed, authenticated, models,
+    modelDiscovery: !authenticated ? "failed" : provider === "claude-code" ? "unsupported" : models.length ? "available" : "failed",
+  };
+  if (options.probe) {
+    const started = performance.now();
+    try {
+      if (!authenticated) throw new Error("Provider is not installed or authenticated.");
+      if (provider === "http" && !options.model) throw new Error("HTTP probing requires --model.");
+      const runtime = await createInferenceRuntime(config);
+      const result = await runtime.generate("harnessme_provider_probe", {
+        type: "object", additionalProperties: false,
+        properties: { ok: { type: "boolean" } }, required: ["ok"],
+      }, "Return JSON with ok set to true.", "Provider diagnostic probe.");
+      if (typeof result !== "object" || result === null || (result as { ok?: unknown }).ok !== true) {
+        throw new Error("Structured response did not contain ok: true.");
+      }
+      diagnosis.probe = { ok: true, elapsedMs: Math.round(performance.now() - started) };
+    } catch (error) {
+      diagnosis.probe = {
+        ok: false, elapsedMs: Math.round(performance.now() - started),
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  return diagnosis;
 }

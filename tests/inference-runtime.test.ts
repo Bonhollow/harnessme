@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createInferenceRuntime, discoverAvailableModels, resolveInferenceProvider } from "../packages/analyzers/src/inference.js";
+import { createInferenceRuntime, diagnoseInferenceProvider, discoverAvailableModels, resolveInferenceProvider, type InferenceEvent } from "../packages/analyzers/src/inference.js";
 
 const originalPath = process.env.PATH;
 const temporaryDirectories: string[] = [];
@@ -75,6 +75,33 @@ console.log(JSON.stringify({ type: "result", is_error: false, result: "I cannot 
     await expect(runtime.generate("probe", { type: "object" }, "Return JSON", "probe"))
       .rejects.toThrow(/Cursor inference returned invalid JSON/u);
   });
+
+  it("reports Cursor call progress and duration without exposing input", async () => {
+    await fakeCursor(`if (process.argv.includes("--version") || process.argv.includes("status")) process.exit(0);
+console.log(JSON.stringify({ type: "result", result: "{\\\"ok\\\":true}" }));`);
+    const events: InferenceEvent[] = [];
+    const runtime = await createInferenceRuntime(cursorConfig, (event) => events.push(event));
+    expect(await runtime.generate("probe", { type: "object" }, "secret system", "secret input")).toEqual({ ok: true });
+    expect(events.map((event) => event.status)).toEqual(["started", "completed"]);
+    expect(events.every((event) => event.provider === "cursor" && event.stage === "probe" && event.elapsedMs >= 0)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("secret");
+  });
+
+  it("diagnoses Cursor login, model catalog, and structured output", async () => {
+    await fakeCursor(`if (process.argv.includes("--version") || process.argv.includes("status")) process.exit(0);
+if (process.argv.includes("--list-models")) { console.log("auto - Auto (default)"); process.exit(0); }
+console.log(JSON.stringify({ type: "result", result: "{\\\"ok\\\":true}" }));`);
+    const diagnosis = await diagnoseInferenceProvider("cursor", { probe: true });
+    expect(diagnosis).toMatchObject({ installed: true, authenticated: true, modelDiscovery: "available", probe: { ok: true } });
+    expect(diagnosis.models).toEqual([{ id: "auto", label: "Auto (default)" }]);
+  });
+
+  it("reports a signed-out Cursor installation as unavailable", async () => {
+    await fakeCursor(`if (process.argv.includes("--version")) process.exit(0);
+if (process.argv.includes("status")) process.exit(1);`);
+    const diagnosis = await diagnoseInferenceProvider("cursor", { probe: true });
+    expect(diagnosis).toMatchObject({ installed: true, authenticated: false, probe: { ok: false } });
+  });
 });
 
 describe.skipIf(process.platform === "win32")("other CLI inference runtimes", () => {
@@ -106,6 +133,14 @@ console.log(JSON.stringify({ is_error: true, result: "Account limit reached" }))
 });
 
 describe("HTTP inference runtime", () => {
+  it("checks HTTP credentials and validates a structured diagnostic probe", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: "{\"ok\":true}" } }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const config = { endpoint: "https://example.test/v1/chat/completions", model: "test-model", probe: true };
+    expect((await diagnoseInferenceProvider("http", { ...config, apiKeyEnv: "HARNESSME_MISSING_TEST_KEY" })).authenticated).toBe(false);
+    expect(await diagnoseInferenceProvider("http", config)).toMatchObject({ installed: true, authenticated: true, probe: { ok: true } });
+  });
+
   it("sends the requested schema and parses structured content", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: "{\"ok\":true}" } }] }) });
     vi.stubGlobal("fetch", fetchMock);

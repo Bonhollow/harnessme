@@ -22,9 +22,9 @@ import {
   defaultFeatureOverrides,
   defaultFeaturePack,
 } from "@harnessme/core";
-import { analyzeProject, authorHarnessWithAi, citedScopePaths, criticalCandidates, protectedEntryCandidates } from "@harnessme/analyzers";
+import { analyzeProject, authorHarnessWithAi, citedScopePaths, criticalCandidates, protectedEntryCandidates, type InferenceEvent } from "@harnessme/analyzers";
 import { referenceDocuments, renderAgentsMd, syncHarness } from "@harnessme/renderers";
-import { createProgress, info, warn } from "../output.js";
+import { createProgress, info, reportInferenceEvent, warn } from "../output.js";
 import { projectRoot } from "../project.js";
 
 async function removeIfPresent(path: string): Promise<void> {
@@ -61,6 +61,11 @@ export default defineCommand({
   },
   async run({ args }) {
     const project = projectRoot(args.root);
+    const inferenceCalls: Array<InferenceEvent & { status: "completed" | "failed" }> = [];
+    const onInferenceEvent = (event: InferenceEvent): void => {
+      reportInferenceEvent(event);
+      if (event.status === "completed" || event.status === "failed") inferenceCalls.push(event as InferenceEvent & { status: "completed" | "failed" });
+    };
     const { result, quality, conflictCount, progress } = await stageRepositoryMutation(project, async (root) => {
       const base = harnessDir(root);
       const previous = await readFacts(root);
@@ -78,6 +83,7 @@ export default defineCommand({
         ...previous.config.analysis,
         aiFallback: args.deterministic ? undefined : previous.config.analysis.aiFallback,
         review: args.deterministic ? undefined : previous.config.analysis.review,
+        onInferenceEvent,
       });
       for (const message of analysis.warnings) warn(message);
       progress.step("Refreshing evidence, conflicts, and risk candidates");
@@ -160,6 +166,7 @@ export default defineCommand({
           previousReferences: previous.referencePack?.documents,
           previousFeatures: previous.featurePack?.features,
           onPhase: (message) => progress.step(message),
+          onInferenceEvent,
         });
         for (const gate of authoredResult.gates) {
           if (criticalPaths.dismissed?.includes(gate.path)) continue;
@@ -275,6 +282,7 @@ export default defineCommand({
           comparison: authoredResult.comparison,
           passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
           activatedGates: authoredResult.gates,
+          inferenceCalls,
         });
       } else {
         await removeIfPresent(join(base, "facts", "AGENTS.authored.md"));

@@ -35,9 +35,10 @@ import {
   previewAiInputs,
   resolveInferenceProvider,
   type InferenceProviderId,
+  type InferenceEvent,
 } from "@harnessme/analyzers";
 import { GENERATED_MARKER, providers, referenceDocuments, renderAgentsMd, resolveProviders, syncHarness } from "@harnessme/renderers";
-import { createProgress, disabled, enabled, info, panel, warn } from "../output.js";
+import { createProgress, disabled, enabled, info, panel, reportInferenceEvent, warn } from "../output.js";
 import { projectRoot, providerValues } from "../project.js";
 import { selectModel } from "../selection.js";
 
@@ -184,6 +185,11 @@ export default defineCommand({
       return;
     }
     const progress = createProgress(config.analysis.aiFallback ? 8 : 6);
+    const inferenceCalls: Array<InferenceEvent & { status: "completed" | "failed" }> = [];
+    const onInferenceEvent = (event: InferenceEvent): void => {
+      reportInferenceEvent(event);
+      if (event.status === "completed" || event.status === "failed") inferenceCalls.push(event as InferenceEvent & { status: "completed" | "failed" });
+    };
     const { result, quality, warnings, criticalPaths, importedAgents, importedRulerAgents } = await stageRepositoryMutation(root, async (root) => {
       const base = harnessDir(root);
       let importedAgents = false;
@@ -242,7 +248,7 @@ export default defineCommand({
       progress.step("Analyzing source, configuration, dependencies, and history");
       let analysis: Awaited<ReturnType<typeof analyzeProject>>;
       try {
-        analysis = await analyzeProject({ root, ...config.analysis });
+        analysis = await analyzeProject({ root, ...config.analysis, onInferenceEvent });
       } catch (error) {
         if (!config.analysis.aiFallback) throw error;
         const reason = error instanceof Error ? error.message : String(error);
@@ -313,6 +319,7 @@ export default defineCommand({
             review: config.analysis.review,
             councilSize: config.analysis.councilSize,
             onPhase: (message) => progress.step(message),
+            onInferenceEvent,
           });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -363,6 +370,7 @@ export default defineCommand({
           comparison: authored.comparison,
           passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
           activatedGates: authored.gates,
+          inferenceCalls,
         });
       } else {
         progress.step("Rendering the deterministic instruction baseline");

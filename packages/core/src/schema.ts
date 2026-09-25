@@ -219,6 +219,10 @@ export const HarnessGenerationSchema = z.object({
   generatedAt: z.string().datetime(),
   reason: z.string().optional(),
   activatedGates: z.array(z.unknown()).default([]),
+  inferenceCalls: z.array(z.object({
+    provider: z.string(), stage: z.string(), status: z.enum(["completed", "failed"]),
+    elapsedMs: z.number().nonnegative(),
+  })).optional(),
 }).passthrough();
 
 export type ReferenceDocument = z.infer<typeof ReferenceDocumentSchema>;

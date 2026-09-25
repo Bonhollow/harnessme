@@ -1,4 +1,5 @@
 import type { AiFallbackConfig, AiReviewConfig, Conventions, DocumentationConflict, Evidence, RepositoryStructure, Stack } from "@harnessme/core";
+import type { InferenceObserver } from "./inference.js";
 
 export interface AnalysisResult {
   conventions: Conventions;
@@ -24,4 +25,5 @@ export interface AnalyzeOptions {
   maxFileBytes: number;
   aiFallback?: AiFallbackConfig;
   review?: AiReviewConfig;
+  onInferenceEvent?: InferenceObserver;
 }

@@ -518,6 +518,7 @@ process.stdin.on("end", () => console.log(JSON.stringify({ structured_output: va
 const fs = require("node:fs");
 if (process.argv.includes("--version")) { console.log("cursor-test"); process.exit(0); }
 if (process.argv.includes("status")) process.exit(0);
+if (process.argv.includes("--list-models")) { console.log("auto - Auto (default)"); process.exit(0); }
 fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
 const input = fs.readFileSync("input.txt", "utf8");
 const schema = JSON.parse(input.slice(input.indexOf("OUTPUT JSON SCHEMA\\n") + "OUTPUT JSON SCHEMA\\n".length));
@@ -525,6 +526,8 @@ const value = schema.properties.facts
   ? { facts: [{ id: "fixture-fact", kind: "language", language: "TypeScript", category: "tooling", statement: "TypeScript source is present.", path: "app.ts", line: 1, excerpt: "export const value" }] }
   : schema.properties.approvedIds
     ? { approvedIds: ["fixture-fact"] }
+    : schema.properties.ok
+      ? { ok: true }
     : JSON.parse(${JSON.stringify(response)});
 console.log(JSON.stringify({ result: JSON.stringify(value) }));
 `);
@@ -533,11 +536,25 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     await writeFile(join(root, "app.ts"), "export const value = 1;\n");
     const argsLog = join(root, "cursor-args.log");
 
+    const diagnosed = await exec(process.execPath, [cli, "providers", "doctor", "--provider", "cursor", "--probe"], {
+      env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, HARNESSME_TEST_ARGS: argsLog },
+    });
+    expect(diagnosed.stdout).toContain("cursor: installed (cursor-agent); ready; 1 model(s)");
+    expect(diagnosed.stdout).toContain("structured probe: passed");
+
     const initialized = await exec(process.execPath, [cli, "init", "--root", root, "--provider", "cursor", "--targets", "cursor"], {
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, HARNESSME_TEST_ARGS: argsLog },
     });
 
     expect(initialized.stdout).toContain("✓ AI-assisted mode: cursor / provider default");
+    expect(initialized.stdout).toContain("Inference harnessme_facts (cursor) started");
+    expect(initialized.stdout).toMatch(/Inference harnessme_agents_draft \(cursor\) completed after [\d.]+s/u);
+    const generation = JSON.parse(await readFile(join(root, ".harnessme", "facts", "harness-generation.json"), "utf8")) as { inferenceCalls: Array<{ stage: string; status: string; elapsedMs: number }> };
+    expect(generation.inferenceCalls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: "harnessme_facts", status: "completed" }),
+      expect.objectContaining({ stage: "harnessme_agents_draft", status: "completed" }),
+    ]));
+    expect(generation.inferenceCalls.every((call) => call.elapsedMs >= 0)).toBe(true);
     expect(await readFile(join(root, ".harnessme", "agent-pack", "contract.md"), "utf8")).toContain("Cursor fixture runtime");
     await expect(access(join(root, "CLAUDE.md"))).rejects.toMatchObject({ code: "ENOENT" });
     const calls = await readFile(argsLog, "utf8");

@@ -155,7 +155,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
 
   if (options.aiFallback?.enabled) {
     try {
-      const fallback = await analyzeWithAiFallback(root, exclude, supportedExtensions, options.aiFallback, options.review);
+      const fallback = await analyzeWithAiFallback(root, exclude, supportedExtensions, options.aiFallback, options.review, options.onInferenceEvent);
       if (fallback.runtime) {
         warnings.push(fallback.independentlyReviewed && fallback.reviewRuntime
           ? `Model-assisted harness inference used ${fallback.runtime}; facts were independently reviewed by ${fallback.reviewRuntime}.`

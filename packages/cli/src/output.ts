@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { InferenceEvent } from "@harnessme/analyzers";
 
 export interface OutputSink {
   info(message: string): void;
@@ -52,6 +53,14 @@ export function disabled(message: string): void {
   const sink = outputSinks.getStore();
   if (sink) return sink.warn(`✗ ${message}`);
   process.stdout.write(`✗ ${message}\n`);
+}
+
+/** Report model latency without printing prompts, repository excerpts, or responses. */
+export function reportInferenceEvent(event: InferenceEvent): void {
+  const seconds = (event.elapsedMs / 1000).toFixed(1);
+  const verb = event.status === "started" ? "started" : event.status === "waiting" ? "still running"
+    : event.status === "completed" ? "completed" : "failed";
+  info(`Inference ${event.stage} (${event.provider}) ${verb}${event.status === "started" ? "" : ` after ${seconds}s`}`);
 }
 
 export function fail(message: string): never {

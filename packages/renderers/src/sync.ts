@@ -13,6 +13,7 @@ import {
   defaultFeatureOverrides,
   defaultFeaturePack,
   GENERATED_FEATURE_MARKER,
+  stageRepositoryMutation,
 } from "@harnessme/core";
 import { isTestPath } from "../../core/src/risk.js";
 import { GENERATED_MARKER, extractPending, renderEntrypointMd } from "./agents-md.js";
@@ -65,7 +66,7 @@ async function renderPrAgentConfig(root: string): Promise<string> {
   return relative;
 }
 
-export async function syncHarness(root: string, targetIds?: string[], options: { archive?: boolean } = {}): Promise<SyncResult> {
+async function syncHarnessInPlace(root: string, targetIds?: string[], options: { archive?: boolean } = {}): Promise<SyncResult> {
   const archive = options.archive !== false;
   if (archive) await captureGeneration(root, "before-sync");
   const facts = await readFacts(root);
@@ -190,4 +191,9 @@ export async function syncHarness(root: string, targetIds?: string[], options: {
   const result = { files: [...new Set(files)].sort(), targets: selected.map((provider) => provider.id) };
   if (archive) await captureGeneration(root, "sync", result.files);
   return result;
+}
+
+export async function syncHarness(root: string, targetIds?: string[], options: { archive?: boolean; staged?: boolean } = {}): Promise<SyncResult> {
+  if (options.staged === false) return syncHarnessInPlace(root, targetIds, options);
+  return stageRepositoryMutation(root, (stagedRoot) => syncHarnessInPlace(stagedRoot, targetIds, options));
 }

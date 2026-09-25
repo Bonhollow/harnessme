@@ -221,7 +221,7 @@ export async function previewHarnessSync(root: string, targetIds?: string[]): Pr
       },
     });
     const { syncHarness } = await import("./sync.js");
-    const result = await syncHarness(copyRoot, targetIds, { archive: false });
+    const result = await syncHarness(copyRoot, targetIds, { archive: false, staged: false });
     return await compareRoots(root, copyRoot, [...result.files, ...await discoverManagedPaths(root), ...await discoverManagedPaths(copyRoot)]);
   } finally {
     await rm(temporary, { recursive: true, force: true });

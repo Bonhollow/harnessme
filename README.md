@@ -161,12 +161,12 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme init` | Analyze a repository and create the harness. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--thinking-level low|medium|high` (Codex), `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--details <text>` |
 | `harnessme scan` | Report source and documentation drift without writing. | No command-specific options. |
 | `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
-| `harnessme sync` | Regenerate generated agent files from validated facts. | `--targets <comma-list>`, `--preview` |
+| `harnessme sync` | Stage and validate generated files, then apply them with rollback if the update fails. | `--targets <comma-list>`, `--preview` |
 | `harnessme generation list` | List the latest local generated-document snapshots. | — |
 | `harnessme generation preview` | Render in an isolated temporary workspace and show the pending file-level diff. | `--targets <comma-list>` |
 | `harnessme generation rollback [id]` | Restore a generated-document snapshot, defaulting to the previous generation. | `--preview` shows the rollback diff without writing. |
 | `harnessme quality` | Score five quality dimensions, print coverage/depth metrics, and rank corrective actions. | No command-specific options. |
-| `harnessme validate` | Validate pending agent notes and refresh facts. | `--max-retries <non-negative integer>`, `--ci` |
+| `harnessme validate` | Verify pending notes and stage the fact and generated-file refresh before applying it. | `--max-retries <non-negative integer>`, `--ci` |
 | `harnessme check` | Fail when stored facts, analyzed source or document contents, or generated guidance have drifted. | `--ci` |
 | `harnessme directive add <text>` | Add a maintainer-authored instruction. | — |
 | `harnessme directive list` | Print maintained directives. | — |

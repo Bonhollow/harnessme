@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { access, chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -887,6 +887,44 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     pkg.dependencies = { react: "19.0.0", express: "5.0.0" };
     await writeFile(join(root, "package.json"), JSON.stringify(pkg, null, 2));
     await expect(exec(process.execPath, [cli, "check", "--ci", "--root", root])).rejects.toMatchObject({ code: 1 });
+  }, 30_000);
+
+  it("leaves generated files and pending facts unchanged when sync or validate fails late", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-transaction-"));
+    await writeFile(join(root, "package.json"), '{"name":"fixture","version":"1.0.0"}\n');
+    await writeFile(join(root, "service.ts"), "export const service = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const agentsPath = join(root, "AGENTS.md");
+    const rulerPath = join(root, ".ruler", "AGENTS.md");
+    const factsPath = join(root, ".harnessme", "facts", "changes.yaml");
+    const generationsPath = join(root, ".harnessme", "generations");
+    const agentPackPath = join(root, ".harnessme", "agent-pack", "agent.md");
+    await writeFile(agentsPath, (await readFile(agentsPath, "utf8")).replace("Read this file", "Read this locally edited file"));
+    await unlink(agentPackPath);
+    await mkdir(agentPackPath);
+    const rootBeforeSync = await readFile(agentsPath, "utf8");
+    const rulerBefore = await readFile(rulerPath, "utf8");
+    const historyBefore = await readdir(generationsPath);
+    await expect(exec(process.execPath, [cli, "sync", "--root", root])).rejects.toMatchObject({
+      code: 1, stderr: expect.stringContaining("agent.md"),
+    });
+    expect(await readFile(agentsPath, "utf8")).toBe(rootBeforeSync);
+    expect(await readFile(rulerPath, "utf8")).toBe(rulerBefore);
+    expect(await readdir(generationsPath)).toEqual(historyBefore);
+
+    await writeFile(agentsPath, rootBeforeSync.replace(
+      "<!-- HARNESSME:PENDING:END -->",
+      "- 2026-09-07: changed `service.ts`\n<!-- HARNESSME:PENDING:END -->",
+    ));
+    const rootBeforeValidate = await readFile(agentsPath, "utf8");
+    const factsBefore = await readFile(factsPath, "utf8");
+    await expect(exec(process.execPath, [cli, "validate", "--root", root])).rejects.toMatchObject({
+      code: 1, stderr: expect.stringContaining("agent.md"),
+    });
+    expect(await readFile(agentsPath, "utf8")).toBe(rootBeforeValidate);
+    expect(await readFile(factsPath, "utf8")).toBe(factsBefore);
+    expect(await readFile(rulerPath, "utf8")).toBe(rulerBefore);
+    expect(await readdir(generationsPath)).toEqual(historyBefore);
   }, 30_000);
 
   it("preserves existing root and nested agent rules through initialization and refresh", async () => {

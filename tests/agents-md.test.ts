@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { renderAgentsMd, renderEntrypointMd } from "../packages/renderers/src/agents-md.js";
+import { extractPending, renderAgentsMd, renderEntrypointMd } from "../packages/renderers/src/agents-md.js";
 import { agentPackDocuments } from "../packages/renderers/src/guidance/agent-pack.js";
 import { readOperatingContract } from "../packages/core/src/facts-store.js";
 import type { FactsSnapshot } from "../packages/core/src/facts-store.js";
@@ -83,7 +83,12 @@ describe("AGENTS.md renderer", () => {
     expect(entrypoint).toContain("Never commit credentials.");
     expect(entrypoint).toContain("`start_server()`, `Runner.run()`, `initialize_core()`");
     expect(entrypoint).toContain(".harnessme/agent-pack/agent.md");
+    expect(entrypoint).toContain("For a local fix with a clear owner");
+    expect(entrypoint).toContain("a local case within an existing rule needs no note");
+    expect(entrypoint).toContain("Run `harnessme validate` after adding a pending note");
+    expect(entrypoint).not.toContain("Read [the canonical agent contract]");
     expect(entrypoint).toContain("changed `src/a.ts`");
+    expect(extractPending(entrypoint)).toBe("- 2026-09-07: changed `src/a.ts`");
     expect(entrypoint).not.toContain("## Repository map");
     const guide = agentPackDocuments(facts, [{
       slug: "core",
@@ -127,14 +132,14 @@ describe("AGENTS.md renderer", () => {
         heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 },
       },
       changes: { schemaVersion: 1, changes: [] },
-      authoredInstructions: "# Repository instructions\n\n## AI-authored guidance\n\nUse the repository's boundaries.\n\n## Validation\n\nRun configured checks.\n\n## Critical-path safety gate\n\nBefore editing a listed path, ask the developer for explicit confirmation. The selected gates are proposals until activated.\n\n{{HARNESSME_CRITICAL_PATHS}}\n\n## Proposed critical paths\n\nThese candidates are active.\n\n## Verified material changes\n\n{{HARNESSME_VERIFIED_CHANGES}}\n\n## Project directives\n\n{{HARNESSME_DIRECTIVES}}\n\n## Keeping this harness current\n\n{{HARNESSME_PENDING}}\n",
+      authoredInstructions: "# Repository instructions\n\n## AI-authored guidance\n\nUse the repository's boundaries.\n\n## Validation\n\nRun configured checks.\n\n## Critical-path safety gate\n\nBefore editing a listed path, ask the developer for explicit confirmation. The selected gates are proposals until activated.\n\n{{HARNESSME_CRITICAL_PATHS}}\n\n## Proposed critical paths\n\nThese candidates are active.\n\n## Verified material changes\n\n{{HARNESSME_VERIFIED_CHANGES}}\n\n## Project directives\n\n{{HARNESSME_DIRECTIVES}}\n\n## Keeping this harness current\n\nEvery code edit needs a pending note and validation.\n\n{{HARNESSME_PENDING}}\n",
     };
     facts.authoredInstructions = facts.authoredInstructions?.replace("Use the repository's boundaries.", "Use the repository's boundaries. Read [Missing guide](.harnessme/references/missing.md) if it exists.");
     const output = renderAgentsMd(facts);
     expect(output).toContain("## AI-authored guidance");
     expect(output).toContain("Read Missing guide if it exists.");
     expect(output).not.toContain(".harnessme/references/missing.md");
-    expect(output).toContain("Read `.harnessme/agent-pack/agent.md` after this file");
+    expect(output).toContain("Read `.harnessme/agent-pack/agent.md` when ownership or an existing invariant is unclear");
     expect(output.indexOf("Before editing, read and follow the Project directives below")).toBeLessThan(output.indexOf("## AI-authored guidance"));
     expect(output).toContain("Never edit the public API without review.");
     expect(output).toContain("discovery does not prove they pass on the current baseline");
@@ -148,6 +153,15 @@ describe("AGENTS.md renderer", () => {
     expect(output.match(/Proposed critical paths/gu)).toHaveLength(1);
     expect(output).toContain("HARNESSME:PENDING:START");
     expect(output).not.toContain("{{HARNESSME_");
+    expect(output).toContain("Add a dated pending note only for a new reusable workflow");
+    expect(output).not.toContain("Every code edit needs a pending note");
+    const entrypoint = renderEntrypointMd(facts);
+    expect(entrypoint).toContain("Active protected paths: `src/core.ts`");
+    expect(entrypoint).toContain("Stop for the required approval before editing a matching path");
+    expect(entrypoint).toContain("Never edit the public API without review.");
+    const agentPack = agentPackDocuments(facts, []).find((document) => document.path.endsWith("/agent.md"))?.markdown ?? "";
+    expect(agentPack).toContain("Active path gates are listed in the root `AGENTS.md`");
+    expect(agentPack).toContain("[CRITICAL.md](../CRITICAL.md) is the approved-change log");
   });
 
   it("rejects altered AI templates with duplicate managed placeholders", () => {

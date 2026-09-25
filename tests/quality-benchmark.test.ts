@@ -325,6 +325,10 @@ describe("harness quality benchmark", () => {
     ]));
     const apiGuide = nestedAgentDocuments(facts).find((item) => item.directory === "src/coreval/api")?.markdown ?? "";
     expect(apiGuide.split("\n").length).toBeLessThan(50);
+    expect(apiGuide).toContain("For a local fix with a clear owner");
+    expect(apiGuide).toContain("Use `harnessme context <path>` if local navigation leaves");
+    expect(apiGuide).toContain("Correct a linked guide when changed behavior makes it inaccurate");
+    expect(apiGuide).toContain("Add a root pending note only for a new reusable rule or workflow");
     expect(apiGuide).not.toContain("## Local operating rules");
     expect(nestedAgentDocuments(facts, [{
       slug: "persistence",

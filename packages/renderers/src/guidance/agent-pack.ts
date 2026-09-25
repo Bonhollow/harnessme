@@ -62,9 +62,9 @@ This is the canonical generated guide for changing this repository. The root \`A
 
 ## First steps
 
-1. Read the root \`AGENTS.md\` and any closer scoped \`AGENTS.md\` for the files you will change.
-2. Find the owning feature in [FEATURES.md](../FEATURES.md), then read only the relevant guide below. Use \`harnessme context <path>\` for a bounded owner, dependency, and test packet.
-3. Inspect the current implementation, its callers, and focused tests before editing. Source code and tests resolve any conflict with generated descriptions.
+1. Follow the root \`AGENTS.md\` and any closer scoped \`AGENTS.md\` for the files you will change.
+2. For a local fix with a clear owner, inspect the current implementation, callers, and focused tests. Source code and tests resolve any conflict with generated descriptions.
+3. When the owner, existing invariant, or extension seam is unclear, use [FEATURES.md](../FEATURES.md) and the relevant guide below. Run \`harnessme context <path>\` only when local navigation does not provide enough owner, dependency, or test context.
 
 ## Task reference map
 
@@ -74,13 +74,13 @@ ${referenceMap}
 
 ${protectedMethods.length ? `Maintainer directives protect these named methods: ${protectedMethods.map((method) => `\`${method}\``).join(", ")}. Follow their exact approval requirement before editing.` : "No named protected method was found in the maintainer directives."}
 
-${activeGates.length ? `Active path gates are linked from the root \`AGENTS.md\` and listed in [CRITICAL.md](../CRITICAL.md). Follow the [critical change audit](critical-change-audit.md) after explicit approval.` : "Review the root directives and proposed critical paths before changing a shared contract."}
+${activeGates.length ? `Active path gates are listed in the root \`AGENTS.md\`. Follow the [critical change audit](critical-change-audit.md) after explicit approval; [CRITICAL.md](../CRITICAL.md) is the approved-change log.` : "Review the root directives and proposed critical paths before changing a shared contract."}
 
-${rules ? `## Grounded invariants for high-impact work\n\n${rules}\n\nRead the linked guide before editing its scope; these excerpts do not replace the root directives or the full guide.\n` : ""}
+${rules ? `## Grounded invariants for high-impact work\n\n${rules}\n\nRead a linked guide when its invariant or seam is relevant to the task; these excerpts do not replace the root directives.\n` : ""}
 
 ## Updating this agent pack
 
-When a change establishes or alters a canonical workflow, invariant, extension seam, or validation rule, update the matching guide in the same change. If tool-specific loading behavior changes, update that adapter too. Keep this index short and put task details in focused references.
+Correct a guide when the changed behavior makes its description inaccurate. Add a root pending note only for a new reusable workflow, invariant, extension seam, or validation rule; local cases within an existing rule need no note. If tool-specific loading behavior changes, update that adapter too. Keep this index short and put task details in focused references.
 
 ${maintenanceMap || "- No focused references were generated. Update the root instructions when the repository's operating contract changes."}
 `,

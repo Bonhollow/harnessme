@@ -1,4 +1,4 @@
-import { mkdir, rm, unlink } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import {
@@ -17,6 +17,7 @@ import {
   readFacts,
   recordQualitySnapshot,
   readText,
+  stageRepositoryMutation,
   writeJson,
   writeFacts,
   writeVerifiedChanges,
@@ -91,17 +92,7 @@ export default defineCommand({
   },
   async run({ args }) {
     const root = projectRoot(args.root);
-    const base = harnessDir(root);
-    let createdIgnore = false;
-    let importedAgents: string | undefined;
-    let importedRulerAgents: string | undefined;
-    const removePartialAiHarness = async (): Promise<void> => {
-      await rm(base, { recursive: true, force: true });
-      if (createdIgnore) await unlink(join(root, ".harnessmeignore"));
-      if (importedAgents !== undefined) await atomicWrite(agentsPath, importedAgents);
-      if (importedRulerAgents !== undefined) await atomicWrite(rulerAgentsPath, importedRulerAgents);
-    };
-    if (await exists(base)) {
+    if (await exists(harnessDir(root))) {
       throw new Error(`HarnessME is already initialized at ${root}. Use \`harnessme refresh\` to reanalyze it or \`harnessme sync\` to rerender stored facts.`);
     }
     // PR-Agent is a pull-request review integration, so opt in explicitly rather
@@ -193,224 +184,227 @@ export default defineCommand({
       return;
     }
     const progress = createProgress(config.analysis.aiFallback ? 8 : 6);
-    progress.step("Preparing the HarnessME workspace");
-    await mkdir(join(base, "facts"), { recursive: true });
-    await mkdir(join(base, "critical-log"), { recursive: true });
-    await mkdir(join(base, "skills"), { recursive: true });
-    if (!await exists(join(root, ".harnessmeignore"))) {
-      await atomicWrite(
-        join(root, ".harnessmeignore"),
-        "# Additional paths that HarnessME must never send to model inference.\n# Built-in exclusions already cover common keys, credentials, .env files, and secret directories.\n",
-      );
-      createdIgnore = true;
-    }
-    await writeYaml(join(base, "harnessme.yaml"), config);
-    const criticalPaths = defaultCriticalPaths();
-    const initialChanges = defaultVerifiedChanges();
-    await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-    await writeYaml(join(base, "feature-overrides.yaml"), defaultFeatureOverrides());
-    await writeVerifiedChanges(root, initialChanges);
-
-    progress.step("Preserving existing repository instructions");
-    let directives = "# Project directives\n\n";
-    const agentsPath = join(root, "AGENTS.md");
-    if (await exists(agentsPath)) {
-      const existing = await readText(agentsPath);
-      if (!existing.startsWith(GENERATED_MARKER)) {
-        importedAgents = existing;
-        directives += `## Imported from the pre-existing AGENTS.md\n\n${existing.trim()}\n\n`;
-        await atomicWrite(join(base, "imported-AGENTS.md"), existing);
-        await unlink(agentsPath);
-        info("Imported the pre-existing AGENTS.md as directives and archived the original in .harnessme/imported-AGENTS.md.");
+    const { result, quality, warnings, criticalPaths, importedAgents, importedRulerAgents } = await stageRepositoryMutation(root, async (root) => {
+      const base = harnessDir(root);
+      let importedAgents = false;
+      let importedRulerAgents = false;
+      progress.step("Preparing the HarnessME workspace");
+      await mkdir(join(base, "facts"), { recursive: true });
+      await mkdir(join(base, "critical-log"), { recursive: true });
+      await mkdir(join(base, "skills"), { recursive: true });
+      if (!await exists(join(root, ".harnessmeignore"))) {
+        await atomicWrite(
+          join(root, ".harnessmeignore"),
+          "# Additional paths that HarnessME must never send to model inference.\n# Built-in exclusions already cover common keys, credentials, .env files, and secret directories.\n",
+        );
       }
-    }
-    const rulerAgentsPath = join(root, ".ruler", "AGENTS.md");
-    if (await exists(rulerAgentsPath)) {
-      const existing = await readText(rulerAgentsPath);
-      if (!existing.startsWith(GENERATED_MARKER)) {
-        importedRulerAgents = existing;
-        directives += `## Imported from the pre-existing .ruler/AGENTS.md\n\n${existing.trim()}\n\n`;
-        await atomicWrite(join(base, "imported-ruler-AGENTS.md"), existing);
-        await unlink(rulerAgentsPath);
-        info("Imported the pre-existing .ruler/AGENTS.md as directives and archived the original.");
-      }
-    }
-    const suppliedDetails = [args.details, args.extraPrompt]
-      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
-      .map((value) => value.trim());
-    if (suppliedDetails.length) {
-      directives += `## ${new Date().toISOString().slice(0, 10)} — Maintainer project context\n\n${suppliedDetails.join("\n\n")}\n`;
-    }
-    await atomicWrite(join(base, "facts", "directives.md"), directives);
-    await atomicWrite(
-      join(base, "CRITICAL.md"),
-      "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`; the machine-readable index is `.harnessme/critical.json`.\n\n## Rollback procedure\n\n1. Contain the impact and preserve the current critical record and deployment evidence before changing state.\n2. Identify the last known-good revision and all affected consumers, data, migrations, and operational dependencies.\n3. Create and obtain approval for a new critical-change record for the rollback; do not bypass the critical-path gate during an incident.\n4. Prefer reverting the deployed change or making a forward-compatible correction. Do not rewrite shared history or destroy data as a rollback shortcut.\n5. Validate restored behavior, compatibility, and data integrity with the repository's verified checks, then document the outcome in the rollback record.\n\n| Date | Risk | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|---|\n",
-    );
-
-    progress.step("Analyzing source, configuration, dependencies, and history");
-    let analysis: Awaited<ReturnType<typeof analyzeProject>>;
-    try {
-      analysis = await analyzeProject({ root, ...config.analysis });
-    } catch (error) {
-      if (!config.analysis.aiFallback) throw error;
-      await removePartialAiHarness();
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new Error(`AI harness analysis failed; no HarnessME artifacts were created: ${reason}`);
-    }
-    progress.step("Saving evidence and critical-path candidates");
-    await writeFacts(root, analysis);
-    const approvers = String(args.criticalApprovers).split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
-    if (!approvers.length) throw new Error("--critical-approvers must include at least one handle.");
-    if (criticalPaths.heuristics.enabled) {
-      for (const candidate of analysis.hotspots.filter((item) =>
-        !isTestPath(item.path) && (
-          item.changes >= criticalPaths.heuristics.minChanges
-          || item.fanIn >= criticalPaths.heuristics.minFanIn
-          || item.score >= criticalPaths.heuristics.minScore
-        )
-      )) {
-        criticalPaths.paths.push({
-          glob: candidate.path,
-          reason: `Automatically detected core/hotspot (${candidate.changes} changes, ${candidate.fanIn} inbound imports, score ${candidate.score}).`,
-          approvers,
-          source: "heuristic",
-          status: "proposed",
-          risk: classifyRisk(candidate.path),
-        });
-      }
-      for (const candidate of criticalCandidates(analysis.sourceFiles)) {
-        if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
-        criticalPaths.paths.push({
-          glob: candidate.path,
-          reason: candidate.reason,
-          approvers,
-          source: "heuristic",
-          status: "proposed",
-          risk: candidate.risk,
-        });
-      }
+      await writeYaml(join(base, "harnessme.yaml"), config);
+      const criticalPaths = defaultCriticalPaths();
+      const initialChanges = defaultVerifiedChanges();
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-    }
-    for (const candidate of await protectedEntryCandidates(root, analysis.sourceFiles, directives)) {
-      const existing = criticalPaths.paths.find((entry) => entry.glob === candidate.path);
-      const rule = { glob: candidate.path, reason: candidate.reason, approvers, source: "explicit" as const, status: "active" as const, risk: candidate.risk };
-      if (existing) Object.assign(existing, rule);
-      else criticalPaths.paths.push(rule);
-    }
-    await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-    config.languages = analysis.stack.languages.map((language) => language.name);
-    await writeYaml(join(base, "harnessme.yaml"), config);
-    if (config.analysis.aiFallback) {
-      const snapshot: FactsSnapshot = {
-        config,
-        conventions: analysis.conventions,
-        stack: analysis.stack,
-        evidence: analysis.evidence,
-        architecture: analysis.architecture,
-        directives,
-        criticalPaths,
-        changes: initialChanges,
-        documentationConflicts: analysis.documentationConflicts,
-      };
-      let authored: Awaited<ReturnType<typeof authorHarnessWithAi>>;
-      try {
-        authored = await authorHarnessWithAi({
-          facts: snapshot,
-          analysis,
-          deterministicBaseline: renderAgentsMd(snapshot),
-          inference: config.analysis.aiFallback,
-          review: config.analysis.review,
-          councilSize: config.analysis.councilSize,
-          onPhase: (message) => progress.step(message),
-        });
-      } catch (error) {
-        await removePartialAiHarness();
-        const reason = error instanceof Error ? error.message : String(error);
-        throw new Error(`AI harness generation failed; no HarnessME artifacts were created: ${reason}`);
-      }
-      if (analysis.structure) {
-        analysis.structure.scopePaths = citedScopePaths(analysis, authored.features, authored.references);
-        await writeJson(join(base, "facts", "structure.json"), analysis.structure);
-      }
-      for (const gate of authored.gates) {
-        const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
-        if (existing) {
-          if (existing.source === "explicit") continue;
-          existing.reason = gate.reason;
-          existing.source = "ai-reviewed";
-          existing.status = "active";
-          existing.risk = gate.risk;
-        } else {
-          criticalPaths.paths.push({
-            glob: gate.path,
-            reason: gate.reason,
-            approvers,
-            source: "ai-reviewed",
-            status: "active",
-            risk: gate.risk,
-          });
+      await writeYaml(join(base, "feature-overrides.yaml"), defaultFeatureOverrides());
+      await writeVerifiedChanges(root, initialChanges);
+
+      progress.step("Preserving existing repository instructions");
+      let directives = "# Project directives\n\n";
+      const agentsPath = join(root, "AGENTS.md");
+      if (await exists(agentsPath)) {
+        const existing = await readText(agentsPath);
+        if (!existing.startsWith(GENERATED_MARKER)) {
+          importedAgents = true;
+          directives += `## Imported from the pre-existing AGENTS.md\n\n${existing.trim()}\n\n`;
+          await atomicWrite(join(base, "imported-AGENTS.md"), existing);
+          await unlink(agentsPath);
         }
       }
+      const rulerAgentsPath = join(root, ".ruler", "AGENTS.md");
+      if (await exists(rulerAgentsPath)) {
+        const existing = await readText(rulerAgentsPath);
+        if (!existing.startsWith(GENERATED_MARKER)) {
+          importedRulerAgents = true;
+          directives += `## Imported from the pre-existing .ruler/AGENTS.md\n\n${existing.trim()}\n\n`;
+          await atomicWrite(join(base, "imported-ruler-AGENTS.md"), existing);
+          await unlink(rulerAgentsPath);
+        }
+      }
+      const suppliedDetails = [args.details, args.extraPrompt]
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim());
+      if (suppliedDetails.length) {
+        directives += `## ${new Date().toISOString().slice(0, 10)} — Maintainer project context\n\n${suppliedDetails.join("\n\n")}\n`;
+      }
+      await atomicWrite(join(base, "facts", "directives.md"), directives);
+      await atomicWrite(
+        join(base, "CRITICAL.md"),
+        "# Critical-path change log\n\nAuto-maintained by HarnessME. Full records are in `.harnessme/critical-log/`; the machine-readable index is `.harnessme/critical.json`.\n\n## Rollback procedure\n\n1. Contain the impact and preserve the current critical record and deployment evidence before changing state.\n2. Identify the last known-good revision and all affected consumers, data, migrations, and operational dependencies.\n3. Create and obtain approval for a new critical-change record for the rollback; do not bypass the critical-path gate during an incident.\n4. Prefer reverting the deployed change or making a forward-compatible correction. Do not rewrite shared history or destroy data as a rollback shortcut.\n5. Validate restored behavior, compatibility, and data integrity with the repository's verified checks, then document the outcome in the rollback record.\n\n| Date | Risk | Path | Summary | Approved by | Change ID |\n|---|---|---|---|---|---|\n",
+      );
+
+      progress.step("Analyzing source, configuration, dependencies, and history");
+      let analysis: Awaited<ReturnType<typeof analyzeProject>>;
+      try {
+        analysis = await analyzeProject({ root, ...config.analysis });
+      } catch (error) {
+        if (!config.analysis.aiFallback) throw error;
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`AI harness analysis failed; no HarnessME artifacts were created: ${reason}`);
+      }
+      progress.step("Saving evidence and critical-path candidates");
+      await writeFacts(root, analysis);
+      const approvers = String(args.criticalApprovers).split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
+      if (!approvers.length) throw new Error("--critical-approvers must include at least one handle.");
+      if (criticalPaths.heuristics.enabled) {
+        for (const candidate of analysis.hotspots.filter((item) =>
+          !isTestPath(item.path) && (
+            item.changes >= criticalPaths.heuristics.minChanges
+            || item.fanIn >= criticalPaths.heuristics.minFanIn
+            || item.score >= criticalPaths.heuristics.minScore
+          )
+        )) {
+          criticalPaths.paths.push({
+            glob: candidate.path,
+            reason: `Automatically detected core/hotspot (${candidate.changes} changes, ${candidate.fanIn} inbound imports, score ${candidate.score}).`,
+            approvers,
+            source: "heuristic",
+            status: "proposed",
+            risk: classifyRisk(candidate.path),
+          });
+        }
+        for (const candidate of criticalCandidates(analysis.sourceFiles)) {
+          if (criticalPaths.paths.some((entry) => entry.glob === candidate.path)) continue;
+          criticalPaths.paths.push({
+            glob: candidate.path,
+            reason: candidate.reason,
+            approvers,
+            source: "heuristic",
+            status: "proposed",
+            risk: candidate.risk,
+          });
+        }
+        await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+      }
+      for (const candidate of await protectedEntryCandidates(root, analysis.sourceFiles, directives)) {
+        const existing = criticalPaths.paths.find((entry) => entry.glob === candidate.path);
+        const rule = { glob: candidate.path, reason: candidate.reason, approvers, source: "explicit" as const, status: "active" as const, risk: candidate.risk };
+        if (existing) Object.assign(existing, rule);
+        else criticalPaths.paths.push(rule);
+      }
       await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
-      await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
-      await writeJson(join(base, "facts", "references.json"), {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        documents: authored.references,
-      });
-      await writeJson(join(base, "facts", "features.json"), {
-        schemaVersion: 1,
-        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
-        features: authored.features,
-      });
-      await writeJson(join(base, "facts", "harness-generation.json"), {
-        status: "ai-reviewed",
-        generatedAt: new Date().toISOString(),
-        authorProvider: authored.authorRuntime,
-        authorModel: config.analysis.aiFallback.model ?? "provider-default",
-        reviewerProvider: authored.reviewerRuntime,
-        reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
-        comparison: authored.comparison,
-        passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
-        activatedGates: authored.gates,
-      });
-    } else {
-      progress.step("Rendering the deterministic instruction baseline");
-      await writeJson(join(base, "facts", "features.json"), {
-        schemaVersion: 1,
-        generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
-        features: [],
-      });
-      await writeJson(join(base, "facts", "harness-generation.json"), {
-        status: "deterministic",
-        generatedAt: new Date().toISOString(),
-        activatedGates: [],
-      });
-    }
-    let qualityFacts = await readFacts(root);
-    if (!qualityFacts.referencePack?.documents.length) {
-      await writeJson(join(base, "facts", "references.json"), {
-        schemaVersion: 1,
-        generatedAt: new Date().toISOString(),
-        documents: referenceDocuments(qualityFacts),
-      });
-      qualityFacts = await readFacts(root);
-    }
-    if (qualityFacts.structure) qualityFacts.knowledgeGraph = createKnowledgeArtifacts({
-      structure: qualityFacts.structure,
-      features: qualityFacts.featurePack ?? defaultFeaturePack(qualityFacts.structure.generatedAt),
-      references: qualityFacts.referencePack,
-      criticalPaths: qualityFacts.criticalPaths,
-      overrides: qualityFacts.featureOverrides ?? defaultFeatureOverrides(),
-      referenceProvenance: config.analysis.aiFallback ? "ai-reviewed" : "deterministic",
-    }).graph;
-    const quality = assessHarnessQuality(qualityFacts, analysis.documentationConflicts ?? [], renderAgentsMd(qualityFacts));
-    await writeJson(join(base, "facts", "quality.json"), quality);
-    progress.step("Generating instructions and governance integrations");
-    const result = await syncHarness(root);
-    await recordQualitySnapshot(root, quality, "init");
+      config.languages = analysis.stack.languages.map((language) => language.name);
+      await writeYaml(join(base, "harnessme.yaml"), config);
+      if (config.analysis.aiFallback) {
+        const snapshot: FactsSnapshot = {
+          config,
+          conventions: analysis.conventions,
+          stack: analysis.stack,
+          evidence: analysis.evidence,
+          architecture: analysis.architecture,
+          directives,
+          criticalPaths,
+          changes: initialChanges,
+          documentationConflicts: analysis.documentationConflicts,
+        };
+        let authored: Awaited<ReturnType<typeof authorHarnessWithAi>>;
+        try {
+          authored = await authorHarnessWithAi({
+            facts: snapshot,
+            analysis,
+            deterministicBaseline: renderAgentsMd(snapshot),
+            inference: config.analysis.aiFallback,
+            review: config.analysis.review,
+            councilSize: config.analysis.councilSize,
+            onPhase: (message) => progress.step(message),
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          throw new Error(`AI harness generation failed; no HarnessME artifacts were created: ${reason}`);
+        }
+        if (analysis.structure) {
+          analysis.structure.scopePaths = citedScopePaths(analysis, authored.features, authored.references);
+          await writeJson(join(base, "facts", "structure.json"), analysis.structure);
+        }
+        for (const gate of authored.gates) {
+          const existing = criticalPaths.paths.find((entry) => entry.glob === gate.path);
+          if (existing) {
+            if (existing.source === "explicit") continue;
+            existing.reason = gate.reason;
+            existing.source = "ai-reviewed";
+            existing.status = "active";
+            existing.risk = gate.risk;
+          } else {
+            criticalPaths.paths.push({
+              glob: gate.path,
+              reason: gate.reason,
+              approvers,
+              source: "ai-reviewed",
+              status: "active",
+              risk: gate.risk,
+            });
+          }
+        }
+        await writeYaml(join(base, "critical-paths.yaml"), criticalPaths);
+        await atomicWrite(join(base, "facts", "AGENTS.authored.md"), authored.markdown);
+        await writeJson(join(base, "facts", "references.json"), {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          documents: authored.references,
+        });
+        await writeJson(join(base, "facts", "features.json"), {
+          schemaVersion: 1,
+          generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+          features: authored.features,
+        });
+        await writeJson(join(base, "facts", "harness-generation.json"), {
+          status: "ai-reviewed",
+          generatedAt: new Date().toISOString(),
+          authorProvider: authored.authorRuntime,
+          authorModel: config.analysis.aiFallback.model ?? "provider-default",
+          reviewerProvider: authored.reviewerRuntime,
+          reviewerModel: config.analysis.review?.model ?? config.analysis.aiFallback.model ?? "provider-default",
+          comparison: authored.comparison,
+          passes: ["evidence-extraction", "claim-verification", "harness-and-reference-authorship", "baseline-comparison"],
+          activatedGates: authored.gates,
+        });
+      } else {
+        progress.step("Rendering the deterministic instruction baseline");
+        await writeJson(join(base, "facts", "features.json"), {
+          schemaVersion: 1,
+          generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
+          features: [],
+        });
+        await writeJson(join(base, "facts", "harness-generation.json"), {
+          status: "deterministic",
+          generatedAt: new Date().toISOString(),
+          activatedGates: [],
+        });
+      }
+      let qualityFacts = await readFacts(root);
+      if (!qualityFacts.referencePack?.documents.length) {
+        await writeJson(join(base, "facts", "references.json"), {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          documents: referenceDocuments(qualityFacts),
+        });
+        qualityFacts = await readFacts(root);
+      }
+      if (qualityFacts.structure) qualityFacts.knowledgeGraph = createKnowledgeArtifacts({
+        structure: qualityFacts.structure,
+        features: qualityFacts.featurePack ?? defaultFeaturePack(qualityFacts.structure.generatedAt),
+        references: qualityFacts.referencePack,
+        criticalPaths: qualityFacts.criticalPaths,
+        overrides: qualityFacts.featureOverrides ?? defaultFeatureOverrides(),
+        referenceProvenance: config.analysis.aiFallback ? "ai-reviewed" : "deterministic",
+      }).graph;
+      const quality = assessHarnessQuality(qualityFacts, analysis.documentationConflicts ?? [], renderAgentsMd(qualityFacts));
+      await writeJson(join(base, "facts", "quality.json"), quality);
+      progress.step("Generating instructions and governance integrations");
+      const result = await syncHarness(root, undefined, { staged: false });
+      await recordQualitySnapshot(root, quality, "init");
+      return { result, quality, warnings: analysis.warnings, criticalPaths, importedAgents, importedRulerAgents };
+    });
     progress.done("Harness created");
-    for (const message of analysis.warnings) warn(message);
+    if (importedAgents) info("Imported the pre-existing AGENTS.md as directives and archived the original in .harnessme/imported-AGENTS.md.");
+    if (importedRulerAgents) info("Imported the pre-existing .ruler/AGENTS.md as directives and archived the original.");
+    for (const message of warnings) warn(message);
     info(`Initialized HarnessME with targets: ${result.targets.join(", ")}.`);
     const activeCount = criticalPaths.paths.filter((entry) => entry.status === "active").length;
     const proposedCount = criticalPaths.paths.filter((entry) => entry.status === "proposed").length;

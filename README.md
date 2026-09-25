@@ -158,9 +158,9 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 
 | Command | Purpose | Options |
 | --- | --- | --- |
-| `harnessme init` | Analyze a repository and create the harness. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--thinking-level low|medium|high` (Codex), `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--details <text>` |
+| `harnessme init` | Analyze a repository and stage the complete harness before applying it. | `--provider auto|codex|claude-code|cursor|http`, `--review-provider …`, `--targets <comma-list>`, `--model <name>`, `--thinking-level low|medium|high` (Codex), `--review-model <name>`, `--ai-endpoint <url>`, `--review-ai-endpoint <url>`, `--ai-api-key-env <env>`, `--review-ai-api-key-env <env>`, `--ai-include <comma-list>`, `--ai-exclude <comma-list>`, `--ai-preview`, `--deterministic`, `--critical-approvers <comma-list>`, `--details <text>` |
 | `harnessme scan` | Report source and documentation drift without writing. | No command-specific options. |
-| `harnessme refresh` | Reanalyze and rewrite generated guidance while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
+| `harnessme refresh` | Stage updated facts and guidance together while preserving directives, approvals, verified changes, and pending notes. | `--deterministic`, `--details <text>` |
 | `harnessme sync` | Stage and validate generated files, then apply them with rollback if the update fails. | `--targets <comma-list>`, `--preview` |
 | `harnessme generation list` | List the latest local generated-document snapshots. | — |
 | `harnessme generation preview` | Render in an isolated temporary workspace and show the pending file-level diff. | `--targets <comma-list>` |

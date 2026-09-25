@@ -927,6 +927,44 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     expect(await readdir(generationsPath)).toEqual(historyBefore);
   }, 30_000);
 
+  it("leaves imported instructions and no harness artifacts when init fails during rendering", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-init-transaction-"));
+    const instructions = "# Existing rules\n\nPreserve this maintainer instruction.\n";
+    await writeFile(join(root, "AGENTS.md"), instructions);
+    await writeFile(join(root, "service.ts"), "export const service = true;\n");
+    await mkdir(join(root, "CLAUDE.md"));
+
+    await expect(exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "claude-code"])).rejects.toMatchObject({ code: 1 });
+    expect(await readFile(join(root, "AGENTS.md"), "utf8")).toBe(instructions);
+    await expect(access(join(root, ".harnessme"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(root, ".harnessmeignore"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readdir(root)).includes("CLAUDE.md")).toBe(true);
+  }, 30_000);
+
+  it("leaves refreshed facts and quality history unchanged when rendering fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-refresh-transaction-"));
+    await writeFile(join(root, "package.json"), '{"name":"fixture","version":"1.0.0"}\n');
+    await writeFile(join(root, "service.ts"), "export const service = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const agentsPath = join(root, "AGENTS.md");
+    const stackPath = join(root, ".harnessme", "facts", "stack.yaml");
+    const historyPath = join(root, ".harnessme", "facts", "quality-history.json");
+    const agentPackPath = join(root, ".harnessme", "agent-pack", "agent.md");
+    const agentsBefore = await readFile(agentsPath, "utf8");
+    const stackBefore = await readFile(stackPath, "utf8");
+    const historyBefore = await readFile(historyPath, "utf8");
+    await writeFile(join(root, "service.ts"), "export const service = false;\n");
+    await unlink(agentPackPath);
+    await mkdir(agentPackPath);
+
+    await expect(exec(process.execPath, [cli, "refresh", "--root", root, "--deterministic"])).rejects.toMatchObject({
+      code: 1, stderr: expect.stringContaining("agent.md"),
+    });
+    expect(await readFile(agentsPath, "utf8")).toBe(agentsBefore);
+    expect(await readFile(stackPath, "utf8")).toBe(stackBefore);
+    expect(await readFile(historyPath, "utf8")).toBe(historyBefore);
+  }, 30_000);
+
   it("preserves existing root and nested agent rules through initialization and refresh", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-import-rules-"));
     await mkdir(join(root, "src"));

@@ -55,9 +55,9 @@ ${documents.map((document) => `- [${document.title}](${prefix}.harnessme/referen
 
 ## Change workflow
 
-1. Read the task-relevant guide above. Use \`harnessme context <path>\` to find the owner, dependencies, and focused tests for a changed file.
-2. Inspect the implementation and callers, then change behavior through its existing extension seam. Update coupled consumers and tests.
-3. Update the relevant guide when a canonical local workflow, invariant, or extension seam changes. Run focused tests and the verified commands in the root guide.
+1. For a local fix with a clear owner, inspect the implementation, callers, and focused tests. Read a guide above when its invariant or extension seam matters to the task. Use \`harnessme context <path>\` if local navigation leaves the owner, dependencies, or tests unclear.
+2. Change behavior through the existing extension seam and update coupled consumers and tests.
+3. Correct a linked guide when changed behavior makes it inaccurate. Add a root pending note only for a new reusable rule or workflow. Run focused tests and applicable checks from repository configuration.
 
 ## Critical changes
 

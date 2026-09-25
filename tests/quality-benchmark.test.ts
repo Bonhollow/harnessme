@@ -40,7 +40,7 @@ function snapshot(authored = ""): FactsSnapshot {
     referencePack: {
       schemaVersion: 1,
       generatedAt,
-      documents: [{ slug: "core", title: "Core", scope: "src/**", description: "Core changes.", markdown: "# Core\n\n## Scope\n\nsrc\n\n## Responsibilities\n\nOwn core.\n\n## Extension seams\n\nUse `src/core.ts`.\n\n## Invariants\n\nPreserve behavior.\n\n## Change impact\n\nUpdate callers and tests together.\n\n## Anti-patterns\n\nDo not duplicate core behavior.\n\n## Change workflow\n\nUpdate tests.\n\n## Validation\n\nnpm test\n\n## Maintenance triggers\n\nUpdate when the interface changes.\n" }],
+      documents: [{ slug: "core", title: "Core", scope: "src/**", description: "Core changes.", markdown: "# Core\n\n## Scope\n\nsrc\n\n## Responsibilities\n\nOwn core at `src/core.ts:1`.\n\n## Extension seams\n\nUse `src/core.ts` through its exported interface.\n\n## Invariants\n\n- Preserve the exported contract for callers (`src/core.ts:1`).\n\n## Change impact\n\nUpdate callers and tests together.\n\n## Anti-patterns\n\nDo not duplicate core behavior.\n\n## Change workflow\n\nUpdate tests.\n\n## Validation\n\nnpm test\n\n## Maintenance triggers\n\nUpdate when the interface changes.\n" }],
     },
     knowledgeGraph: { schemaVersion: 1, generatedAt, generation: "deterministic", nodes: [{ id: "file:src/core.ts", kind: "file", label: "core.ts", path: "src/core.ts", provenance: "deterministic", citations: [{ path: "src/core.ts", line: 1 }] }], edges: [], diagnostics: [] },
   };
@@ -95,7 +95,7 @@ describe("harness quality benchmark", () => {
     shallow.evidence = [];
     shallow.conventions.facts = [];
     shallow.referencePack = undefined;
-    expect(assessHarnessQuality(shallow).score).toBeLessThan(25);
+    expect(assessHarnessQuality(shallow).score).toBeLessThan(30);
   });
 
   it("creates an executable remediation plan for every failed quality check", () => {
@@ -117,7 +117,7 @@ describe("harness quality benchmark", () => {
     expect(quality.score).toBeGreaterThanOrEqual(95);
     expect(quality.grade).toBe("excellent");
     expect(quality.dimensions).toHaveLength(5);
-    expect(quality.metrics).toHaveLength(6);
+    expect(quality.metrics).toHaveLength(7);
     expect(quality.findings).toHaveLength(0);
   });
 
@@ -133,9 +133,25 @@ describe("harness quality benchmark", () => {
     ]));
   });
 
+  it("flags a central path with no semantic owner or guide even when general coverage is high", () => {
+    const facts = comprehensiveSnapshot();
+    facts.stack.sourcePaths!.push("src/unguided.ts");
+    facts.criticalPaths.paths.push({ glob: "src/unguided.ts", reason: "Shared runtime", approvers: ["developer"], source: "heuristic", status: "proposed", risk: "shared-core" });
+    expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "critical-context", passed: false }));
+    expect(assessHarnessQuality(facts).grade).toBe("strong");
+  });
+
   it("does not award reference-pack quality to shallow scoped notes", () => {
     const facts = snapshot("# Repository instructions\n\n## Before editing\n\nInspect `src/core.ts`.\n\n## Operating rules\n\nPreserve contracts.\n\n## Core boundaries\n\n`src/core.ts`\n\n## Change workflows\n\nEdit `src/core.ts` and update tests.\n");
     facts.referencePack!.documents[0]!.markdown = "# Core\n\n## Scope\n\n`src/**`\n\n## Responsibilities\n\nOwn core.\n";
+    expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "reference-depth", passed: false }));
+  });
+
+  it("does not count syntactic evidence and generic extension prose as a deep guide", () => {
+    const facts = comprehensiveSnapshot();
+    facts.referencePack!.documents[0]!.markdown = facts.referencePack!.documents[0]!.markdown
+      .replace("Use `src/core.ts` through its exported interface.", "Extend behavior through the existing owning interface in `src/core.ts`.")
+      .replace("- Preserve the exported contract for callers (`src/core.ts:1`).", "No behavioral invariant was verified deterministically.");
     expect(assessHarnessQuality(facts).checks).toContainEqual(expect.objectContaining({ id: "reference-depth", passed: false }));
   });
 

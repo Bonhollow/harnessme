@@ -191,6 +191,8 @@ Commands that operate on a repository accept `--root <path>` to operate on anoth
 | `harnessme feature link <from> <to>` | Add a feature relationship. | `--kind depends-on\|related-to`. |
 | `harnessme feature unlink <from> <to>` | Remove or exclude a feature relationship. | `--kind depends-on\|related-to`. |
 
+Directive, critical-path, and feature changes stage their stored settings, generated integrations, and history together. Critical approval stages its record, index, and manifest together. Dashboard provider changes and multi-step quality or gate workflows use the same commit boundary. A failed update leaves the existing repository files unchanged.
+
 `--provider` and `--review-provider` select inference runtimes. `--targets` selects generated instruction formats; the two settings are intentionally independent. The HTTP provider requires `--ai-endpoint` and `--model`; HTTP review requires `--review-ai-endpoint` and `--review-model`.
 
 ### MCP server

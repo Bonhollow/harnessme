@@ -965,6 +965,72 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     expect(await readFile(historyPath, "utf8")).toBe(historyBefore);
   }, 30_000);
 
+  it("keeps critical rules, feature overrides, and directives unchanged when synchronization fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-governance-transaction-"));
+    await writeFile(join(root, "package.json"), '{"name":"fixture","version":"1.0.0"}\n');
+    await writeFile(join(root, "service.ts"), "export const service = true;\n");
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    const rulesPath = join(root, ".harnessme", "critical-paths.yaml");
+    const featuresPath = join(root, ".harnessme", "feature-overrides.yaml");
+    const directivesPath = join(root, ".harnessme", "facts", "directives.md");
+    const agentsPath = join(root, "AGENTS.md");
+    const historyPath = join(root, ".harnessme", "generations");
+    const before = await Promise.all([rulesPath, featuresPath, directivesPath, agentsPath].map((path) => readFile(path, "utf8")));
+    const historyBefore = await readdir(historyPath);
+    const agentPackPath = join(root, ".harnessme", "agent-pack", "agent.md");
+    await unlink(agentPackPath);
+    await mkdir(agentPackPath);
+
+    const attempts = [
+      ["critical", "add", "service.ts", "--reason", "fixture contract", "--approvers", "owner"],
+      ["feature", "add", "service-feature", "--title", "Service", "--summary", "Service behavior", "--scopes", "service.ts"],
+      ["directive", "add", "Preserve the service contract."],
+    ];
+    for (const args of attempts) {
+      await expect(exec(process.execPath, [cli, ...args, "--root", root])).rejects.toMatchObject({ code: 1 });
+      expect(await Promise.all([rulesPath, featuresPath, directivesPath, agentsPath].map((path) => readFile(path, "utf8")))).toEqual(before);
+      expect(await readdir(historyPath)).toEqual(historyBefore);
+    }
+
+    const protocol = [
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1" } } }),
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "harnessme_add_directive", arguments: { text: "MCP directive should fail atomically.", confirm: true } } }),
+    ].join("\n");
+    const served = await execWithInput(process.execPath, [cli, "mcp", "--root", root], `${protocol}\n`);
+    expect(served.code).toBe(0);
+    expect(served.stdout).toContain('"isError":true');
+    expect(await Promise.all([rulesPath, featuresPath, directivesPath, agentsPath].map((path) => readFile(path, "utf8")))).toEqual(before);
+    expect(await readdir(historyPath)).toEqual(historyBefore);
+  }, 30_000);
+
+  it("keeps a critical approval draft and index unchanged when manifest writing fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "harnessme-approval-transaction-"));
+    await writeFile(join(root, "package.json"), '{"name":"fixture","version":"1.0.0"}\n');
+    await writeFile(join(root, "payment.ts"), "export const amount = 1;\n");
+    await exec("git", ["init"], { cwd: root });
+    await exec("git", ["add", "package.json", "payment.ts"], { cwd: root });
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "initial"], { cwd: root });
+    await exec(process.execPath, [cli, "init", "--root", root, "--deterministic", "--targets", "codex"]);
+    await exec(process.execPath, [cli, "critical", "add", "payment.ts", "--reason", "money movement", "--approvers", "owner", "--root", root]);
+    const drafted = await exec(process.execPath, [cli, "critical", "draft", "payment.ts", "--summary", "change amount", "--root", root]);
+    const record = drafted.stdout.match(/critical-log\/([^\s]+\.md)/u)?.[1];
+    expect(record).toBeTruthy();
+    await writeFile(join(root, "payment.ts"), "export const amount = 2;\n");
+    await exec("git", ["add", "payment.ts"], { cwd: root });
+    const recordPath = join(root, ".harnessme", "critical-log", record!);
+    const indexPath = join(root, ".harnessme", "CRITICAL.md");
+    const manifestPath = join(root, ".harnessme", "critical.json");
+    const recordBefore = await readFile(recordPath, "utf8");
+    const indexBefore = await readFile(indexPath, "utf8");
+    await unlink(manifestPath);
+    await mkdir(manifestPath);
+
+    await expect(exec(process.execPath, [cli, "critical", "approve", record!, "--approver", "owner", "--root", root])).rejects.toMatchObject({ code: 1 });
+    expect(await readFile(recordPath, "utf8")).toBe(recordBefore);
+    expect(await readFile(indexPath, "utf8")).toBe(indexBefore);
+    expect(await readdir(manifestPath)).toEqual([]);
+  }, 30_000);
+
   it("preserves existing root and nested agent rules through initialization and refresh", async () => {
     const root = await mkdtemp(join(tmpdir(), "harnessme-import-rules-"));
     await mkdir(join(root, "src"));

@@ -19,13 +19,14 @@ import {
   recordCriticalReview,
   repositoryRelativePath,
   stagedChangeId,
+  stageRepositoryMutation,
   writeCriticalManifest,
   writeYaml,
 } from "@harnessme/core";
 import { protectedEntryCandidates } from "@harnessme/analyzers";
 import { createProgress, info } from "../output.js";
 import { projectRoot } from "../project.js";
-import { syncHarness } from "@harnessme/renderers";
+import { updateHarness } from "../harness-update.js";
 
 function handles(value: string): string[] {
   const result = value.split(",").map((item) => item.trim().replace(/^@/u, "")).filter(Boolean);
@@ -50,6 +51,25 @@ const GateReviewPlanSchema = z.object({
   }).strict()).min(1),
 }).strict();
 
+async function validateReviewPlan(root: string, plan: z.infer<typeof GateReviewPlanSchema>): Promise<Awaited<ReturnType<typeof readCriticalPaths>>> {
+  const config = await readCriticalPaths(root);
+  const facts = await readFacts(root);
+  const protectedEntries = await protectedEntryCandidates(root, facts.stack.sourcePaths ?? [], facts.directives);
+  const protectedPaths = new Set(protectedEntries.map((entry) => entry.path));
+  const seen = new Set<string>();
+  for (const item of plan.decisions) {
+    const glob = posixPath(item.glob);
+    if (seen.has(glob)) throw new Error(`Duplicate critical-path review decision: ${glob}`);
+    seen.add(glob);
+    const rule = config.paths.find((entry) => entry.glob === glob);
+    if (!rule || rule.status !== "proposed") throw new Error(`Batch review requires a proposed critical path: ${glob}`);
+    if (item.decision === "dismiss" && protectedPaths.has(glob)) {
+      throw new Error(`${glob} is protected by maintainer directives and cannot be dismissed.`);
+    }
+  }
+  return config;
+}
+
 export const add = defineCommand({
   meta: { name: "add", description: "Register a critical path glob" },
   args: {
@@ -67,24 +87,25 @@ export const add = defineCommand({
     if (glob.startsWith("/") || /^[A-Za-z]:\//u.test(glob) || glob.split("/").includes("..")) {
       throw new Error("Critical globs must stay relative to the repository root.");
     }
-    const config = await readCriticalPaths(root);
-    const existing = config.paths.find((entry) => entry.glob === glob);
-    if (existing?.status === "active") throw new Error(`Critical path already exists: ${glob}`);
     const allowedRisks = ["security", "persistence", "public-contract", "billing", "deployment", "shared-core", "other"] as const;
     const risk = args.risk ?? classifyRisk(glob);
     if (!allowedRisks.includes(risk as typeof allowedRisks[number])) throw new Error(`Unsupported risk category: ${risk}`);
-    const rule = { glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit" as const, status: "active" as const, risk: risk as typeof allowedRisks[number] };
-    if (existing) recordCriticalReview(config, glob, "activate", args.reason);
-    if (existing) Object.assign(existing, rule);
-    else config.paths.push(rule);
-    config.dismissed = (config.dismissed ?? []).filter((path) => path !== glob);
-    config.paths.sort((a, b) => a.glob.localeCompare(b.glob));
-    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
     progress.step("Regenerating agent and governance integrations");
-    await syncHarness(root);
-    await recordGateQuality(root);
+    const promoted = await updateHarness(root, async (stagedRoot) => {
+      const config = await readCriticalPaths(stagedRoot);
+      const existing = config.paths.find((entry) => entry.glob === glob);
+      if (existing?.status === "active") throw new Error(`Critical path already exists: ${glob}`);
+      const rule = { glob, reason: args.reason, approvers: handles(args.approvers), source: "explicit" as const, status: "active" as const, risk: risk as typeof allowedRisks[number] };
+      if (existing) recordCriticalReview(config, glob, "activate", args.reason);
+      if (existing) Object.assign(existing, rule);
+      else config.paths.push(rule);
+      config.dismissed = (config.dismissed ?? []).filter((path) => path !== glob);
+      config.paths.sort((a, b) => a.glob.localeCompare(b.glob));
+      await writeYaml(join(harnessDir(stagedRoot), "critical-paths.yaml"), config);
+      return Boolean(existing);
+    }, recordGateQuality);
     progress.done("Critical-path rule registered");
-    info(`${existing ? "Promoted proposed" : "Registered"} ${glob}; updated agent instructions, hooks, and CODEOWNERS.`);
+    info(`${promoted ? "Promoted proposed" : "Registered"} ${glob}; updated agent instructions, hooks, and CODEOWNERS.`);
   },
 });
 
@@ -113,14 +134,17 @@ export const activate = defineCommand({
     const rule = config.paths.find((entry) => entry.glob === posixPath(args.glob));
     if (!rule) throw new Error(`No proposed critical path exists for: ${args.glob}`);
     if (rule.status === "active") return info(`${rule.glob} is already active.`);
-    recordCriticalReview(config, rule.glob, "activate", args.reason);
-    rule.status = "active";
-    rule.reason = args.reason.trim();
-    config.dismissed = (config.dismissed ?? []).filter((path) => path !== rule.glob);
-    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
     progress.step("Regenerating agent and governance integrations");
-    await syncHarness(root);
-    await recordGateQuality(root);
+    await updateHarness(root, async (stagedRoot) => {
+      const stagedConfig = await readCriticalPaths(stagedRoot);
+      const stagedRule = stagedConfig.paths.find((entry) => entry.glob === rule.glob);
+      if (!stagedRule || stagedRule.status !== "proposed") throw new Error(`No proposed critical path exists for: ${args.glob}`);
+      recordCriticalReview(stagedConfig, stagedRule.glob, "activate", args.reason);
+      stagedRule.status = "active";
+      stagedRule.reason = args.reason.trim();
+      stagedConfig.dismissed = (stagedConfig.dismissed ?? []).filter((path) => path !== stagedRule.glob);
+      await writeYaml(join(harnessDir(stagedRoot), "critical-paths.yaml"), stagedConfig);
+    }, recordGateQuality);
     progress.done("Critical-path rule activated");
     info(`Activated ${rule.glob}; updated agent instructions, hooks, and CODEOWNERS.`);
   },
@@ -137,22 +161,23 @@ export const remove = defineCommand({
     const root = projectRoot(args.root);
     const progress = createProgress(3);
     progress.step("Loading the critical-path rule");
-    const config = await readCriticalPaths(root);
     const glob = posixPath(args.glob);
-    const index = config.paths.findIndex((entry) => entry.glob === glob);
-    if (index < 0) throw new Error(`No critical path exists for: ${args.glob}`);
-    const facts = await readFacts(root);
-    const protectedEntries = await protectedEntryCandidates(root, facts.stack.sourcePaths ?? [], facts.directives);
-    if (protectedEntries.some((entry) => entry.path === glob)) {
-      throw new Error(`${glob} is protected by imported maintainer directives; update those directives before removing its gate.`);
-    }
-    recordCriticalReview(config, glob, "dismiss", args.reason);
-    const [removed] = config.paths.splice(index, 1);
-    config.dismissed = [...new Set([...(config.dismissed ?? []), glob])].sort();
-    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
     progress.step("Regenerating agent and governance integrations");
-    await syncHarness(root);
-    await recordGateQuality(root);
+    const removed = await updateHarness(root, async (stagedRoot) => {
+      const config = await readCriticalPaths(stagedRoot);
+      const index = config.paths.findIndex((entry) => entry.glob === glob);
+      if (index < 0) throw new Error(`No critical path exists for: ${args.glob}`);
+      const facts = await readFacts(stagedRoot);
+      const protectedEntries = await protectedEntryCandidates(stagedRoot, facts.stack.sourcePaths ?? [], facts.directives);
+      if (protectedEntries.some((entry) => entry.path === glob)) {
+        throw new Error(`${glob} is protected by imported maintainer directives; update those directives before removing its gate.`);
+      }
+      recordCriticalReview(config, glob, "dismiss", args.reason);
+      const [removedRule] = config.paths.splice(index, 1);
+      config.dismissed = [...new Set([...(config.dismissed ?? []), glob])].sort();
+      await writeYaml(join(harnessDir(stagedRoot), "critical-paths.yaml"), config);
+      return removedRule;
+    }, recordGateQuality);
     progress.done("Critical-path rule removed");
     info(`Removed ${removed?.glob} and dismissed future automatic proposals for this path; updated agent instructions, hooks, and CODEOWNERS.`);
   },
@@ -169,41 +194,28 @@ export const review = defineCommand({
     const root = projectRoot(args.root);
     const planPath = isAbsolute(args.file) ? args.file : join(root, args.file);
     const plan = await readYaml(planPath, GateReviewPlanSchema);
-    const config = await readCriticalPaths(root);
-    const facts = await readFacts(root);
-    const protectedEntries = await protectedEntryCandidates(root, facts.stack.sourcePaths ?? [], facts.directives);
-    const protectedPaths = new Set(protectedEntries.map((entry) => entry.path));
-    const seen = new Set<string>();
-    for (const item of plan.decisions) {
-      const glob = posixPath(item.glob);
-      if (seen.has(glob)) throw new Error(`Duplicate critical-path review decision: ${glob}`);
-      seen.add(glob);
-      const rule = config.paths.find((entry) => entry.glob === glob);
-      if (!rule || rule.status !== "proposed") throw new Error(`Batch review requires a proposed critical path: ${glob}`);
-      if (item.decision === "dismiss" && protectedPaths.has(glob)) {
-        throw new Error(`${glob} is protected by maintainer directives and cannot be dismissed.`);
-      }
-    }
     if (args.dryRun) {
+      await validateReviewPlan(root, plan);
       for (const item of plan.decisions) info(`${item.decision}\t${item.glob}\t${item.reason}`);
       return info(`Validated ${plan.decisions.length} critical-path review decision(s); no files changed.`);
     }
-    for (const item of plan.decisions) {
-      const glob = posixPath(item.glob);
-      recordCriticalReview(config, glob, item.decision, item.reason);
-      if (item.decision === "activate") {
-        const rule = config.paths.find((entry) => entry.glob === glob)!;
-        rule.status = "active";
-        rule.reason = item.reason;
-        config.dismissed = (config.dismissed ?? []).filter((path) => path !== glob);
-      } else {
-        config.paths = config.paths.filter((entry) => entry.glob !== glob);
-        config.dismissed = [...new Set([...(config.dismissed ?? []), glob])].sort();
+    await updateHarness(root, async (stagedRoot) => {
+      const config = await validateReviewPlan(stagedRoot, plan);
+      for (const item of plan.decisions) {
+        const glob = posixPath(item.glob);
+        recordCriticalReview(config, glob, item.decision, item.reason);
+        if (item.decision === "activate") {
+          const rule = config.paths.find((entry) => entry.glob === glob)!;
+          rule.status = "active";
+          rule.reason = item.reason;
+          config.dismissed = (config.dismissed ?? []).filter((path) => path !== glob);
+        } else {
+          config.paths = config.paths.filter((entry) => entry.glob !== glob);
+          config.dismissed = [...new Set([...(config.dismissed ?? []), glob])].sort();
+        }
       }
-    }
-    await writeYaml(join(harnessDir(root), "critical-paths.yaml"), config);
-    await syncHarness(root);
-    await recordGateQuality(root);
+      await writeYaml(join(harnessDir(stagedRoot), "critical-paths.yaml"), config);
+    }, recordGateQuality);
     info(`Applied ${plan.decisions.length} reviewed gate decision(s); agent instructions, hooks, CODEOWNERS, and quality history were updated.`);
   },
 });
@@ -253,24 +265,33 @@ export const approve = defineCommand({
     if (!rule) throw new Error(`${path} is no longer registered as a critical path.`);
     const allowed = rule.approvers.map((item) => item.replace(/^@/u, "")).includes(approver);
     if (!allowed) throw new Error(`@${approver} is not listed as an approver for ${path}.`);
-    document.data.path = safeProjectRelative(root, path);
-    document.data.approvers = rule.approvers;
-    document.data.status = "approved";
-    document.data["approved-by"] = approver;
-    document.data["change-id"] = await stagedChangeId(root, path);
-    await atomicWrite(recordPath, matter.stringify(document.content, document.data));
+    const changeId = await stagedChangeId(root, path);
+    await stageRepositoryMutation(root, async (stagedRoot) => {
+      const stagedRecordPath = join(harnessDir(stagedRoot), "critical-log", file);
+      const stagedDocument = matter(await readText(stagedRecordPath));
+      if (stagedDocument.data.path !== path) throw new Error(`Critical record path changed while approving ${file}.`);
+      const stagedConfig = await readCriticalPaths(stagedRoot);
+      const stagedRule = matchingCriticalPath(stagedConfig, path);
+      if (!stagedRule || !stagedRule.approvers.map((item) => item.replace(/^@/u, "")).includes(approver)) {
+        throw new Error(`@${approver} is no longer listed as an approver for ${path}.`);
+      }
+      stagedDocument.data.path = safeProjectRelative(stagedRoot, path);
+      stagedDocument.data.approvers = stagedRule.approvers;
+      stagedDocument.data.status = "approved";
+      stagedDocument.data["approved-by"] = approver;
+      stagedDocument.data["change-id"] = changeId;
+      await atomicWrite(stagedRecordPath, matter.stringify(stagedDocument.content, stagedDocument.data));
 
-    const indexPath = join(harnessDir(root), "CRITICAL.md");
-    const index = await readText(indexPath);
-    const summary = String(document.data.summary).replaceAll("|", "\\|");
-    const row = index.includes("| Date | Risk |")
-      ? `| ${document.data.date} | ${rule.risk ?? classifyRisk(path)} | ${path} | ${summary} | @${approver} | ${document.data["change-id"]} |`
-      : `| ${document.data.date} | ${path} | ${summary} | @${approver} | ${document.data["change-id"]} |`;
-    if (!index.includes(String(document.data["change-id"]))) {
-      await atomicWrite(indexPath, `${index.trimEnd()}\n${row}\n`);
-    }
-    await writeCriticalManifest(root, await readCriticalPaths(root));
-    info(`Approved ${file} for staged content ${document.data["change-id"]}. Stage this record, .harnessme/CRITICAL.md, and .harnessme/critical.json with the code.`);
+      const indexPath = join(harnessDir(stagedRoot), "CRITICAL.md");
+      const index = await readText(indexPath);
+      const summary = String(stagedDocument.data.summary).replaceAll("|", "\\|");
+      const row = index.includes("| Date | Risk |")
+        ? `| ${stagedDocument.data.date} | ${stagedRule.risk ?? classifyRisk(path)} | ${path} | ${summary} | @${approver} | ${changeId} |`
+        : `| ${stagedDocument.data.date} | ${path} | ${summary} | @${approver} | ${changeId} |`;
+      if (!index.includes(changeId)) await atomicWrite(indexPath, `${index.trimEnd()}\n${row}\n`);
+      await writeCriticalManifest(stagedRoot, stagedConfig);
+    });
+    info(`Approved ${file} for staged content ${changeId}. Stage this record, .harnessme/CRITICAL.md, and .harnessme/critical.json with the code.`);
   },
 });
 

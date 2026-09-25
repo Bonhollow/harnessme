@@ -4,14 +4,13 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
-import { planQualityRemediations, readFacts, recordQualitySnapshot, type QualityRemediation } from "@harnessme/core";
+import { planQualityRemediations, readFacts, recordQualitySnapshot, stageRepositoryMutation, type QualityRemediation } from "@harnessme/core";
 import initCommand from "../commands/init.js";
 import refreshCommand from "../commands/refresh.js";
 import syncCommand from "../commands/sync.js";
 import contextCommand from "../commands/context.js";
 import { listGenerations, previewGenerationRollback, previewHarnessSync, rollbackGeneration } from "@harnessme/renderers";
-import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
-import { configureInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, type InferenceChoice, type OperationOutput } from "./actions.js";
+import { configureAndRefreshInference, removeHarnessState, resolveInferenceChoice, runDashboardCommand, runGatePlan, runGatePlanInPlace, type InferenceChoice, type OperationOutput } from "./actions.js";
 import { manageGates } from "./gates.js";
 import { collectProjectDetails } from "./details.js";
 import { loadQualityReport } from "./quality.js";
@@ -171,12 +170,15 @@ async function chooseQualityImprovement(root: string): Promise<QualityRemediatio
   return confirmed?.value === true ? plan : undefined;
 }
 
-function withQualityVerification(root: string, plan: QualityRemediation, operation: Operation): Operation {
+function withQualityVerification(root: string, plan: QualityRemediation, operation: (stagedRoot: string, onOutput: OperationOutput) => Promise<void>): Operation {
   return async (onOutput) => {
     onOutput(`Target: ${plan.title}\nProjected quality: ${plan.currentScore} → up to ${plan.projectedScore}/100\n`);
-    await operation(onOutput);
-    const after = await loadQualityReport(root);
-    await recordQualitySnapshot(root, after.quality, "remediation");
+    const after = await stageRepositoryMutation(root, async (stagedRoot) => {
+      await operation(stagedRoot, onOutput);
+      const report = await loadQualityReport(stagedRoot);
+      await recordQualitySnapshot(stagedRoot, report.quality, "remediation");
+      return report;
+    });
     const resolved = !after.quality.findings.some((finding) => finding.checkId === plan.id);
     const delta = after.quality.score - plan.currentScore;
     onOutput(`\nQuality verification: ${plan.currentScore} → ${after.quality.score}/100 (${delta >= 0 ? "+" : ""}${delta})\n`);
@@ -312,8 +314,8 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         const choice = await chooseInference();
         if (!choice) return undefined;
         return async (onOutput) => {
-          await configureInference(root, choice);
-          await runDashboardCommand(root, refreshCommand, { deterministic: choice.deterministic }, onOutput);
+          await configureAndRefreshInference(root, choice, (stagedRoot) =>
+            runDashboardCommand(stagedRoot, refreshCommand, { deterministic: choice.deterministic }, onOutput));
         };
       } },
       { label: "Quality report", description: "Open an actionable health view with score, gaps, and next steps.", prepare: async () => {
@@ -326,19 +328,13 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
         if (remediation.workflow === "gates") {
           const gatePlan = await manageGates(root);
           if (!gatePlan || (!gatePlan.activate.length && !gatePlan.remove.length && !gatePlan.dismiss.length && !gatePlan.add)) return undefined;
-          const operation: Operation = async (onOutput) => {
-            for (const glob of gatePlan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
-            for (const glob of gatePlan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
-            for (const glob of gatePlan.dismiss) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: gatePlan.reasons?.[glob] }, onOutput);
-            if (gatePlan.add) await runDashboardCommand(root, addCriticalCommand, gatePlan.add, onOutput);
-          };
-          return withQualityVerification(root, remediation, operation);
+          return withQualityVerification(root, remediation, (stagedRoot, onOutput) => runGatePlanInPlace(stagedRoot, gatePlan, onOutput));
         }
         if (remediation.workflow === "features") {
           const featurePlan = await manageFeatures(root);
-          return featurePlan ? withQualityVerification(root, remediation, featureOperation(root, featurePlan)) : undefined;
+          return featurePlan ? withQualityVerification(root, remediation, (stagedRoot, onOutput) => featureOperation(stagedRoot, featurePlan)(onOutput)) : undefined;
         }
-        return withQualityVerification(root, remediation, async (onOutput) => runDashboardCommand(root, refreshCommand, {
+        return withQualityVerification(root, remediation, async (stagedRoot, onOutput) => runDashboardCommand(stagedRoot, refreshCommand, {
           deterministic: remediation.workflow === "refresh-deterministic",
           details: `Quality remediation focus: ${remediation.action}`,
         }, onOutput));
@@ -346,12 +342,7 @@ export async function openDashboard(root = process.cwd()): Promise<void> {
       { label: "Manage critical gates", description: "Select, activate, remove, or add protected paths in one interactive screen.", prepare: async () => {
         const plan = await manageGates(root);
         if (!plan || (!plan.activate.length && !plan.remove.length && !plan.dismiss.length && !plan.add)) return undefined;
-        return async (onOutput) => {
-          for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
-          for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
-          for (const glob of plan.dismiss) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
-          if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
-        };
+        return async (onOutput) => runGatePlan(root, plan, onOutput);
       } },
       { label: "Sync integrations", description: "Regenerate provider files from stored facts.", prepare: async () => async (onOutput) => runDashboardCommand(root, syncCommand, {}, onOutput) },
       { label: "Preview generated changes", description: "Render in an isolated workspace and show file-level changes without writing.", prepare: async () => async (onOutput) => {

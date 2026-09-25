@@ -11,6 +11,8 @@ export interface AnalysisResult {
   /** Redacted, bounded repository excerpts for authorship. This is never persisted. */
   authorContext?: string;
   sourceFiles: string[];
+  /** Existing repository files used to ground agent scopes without reading their contents. */
+  scopePaths?: string[];
   commands: string[];
   documentationConflicts?: DocumentationConflict[];
   structure?: RepositoryStructure;

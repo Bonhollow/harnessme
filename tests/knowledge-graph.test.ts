@@ -30,6 +30,17 @@ const features: FeaturePack = {
 };
 
 describe("knowledge graph", () => {
+  it("indexes validated infrastructure files cited by a feature", () => {
+    const path = "apps/clusters/gov/helm-release.yaml";
+    const graph = createKnowledgeArtifacts({
+      structure: { ...structure, scopePaths: [path] },
+      features: { ...features, features: [{ ...features.features[0]!, slug: "deployment", title: "Deployment", scopes: ["apps/clusters/**"], citations: [{ path, line: 1 }] }] },
+      criticalPaths: { schemaVersion: 1, paths: [], heuristics: { enabled: true, minChanges: 25, minFanIn: 5, minScore: 25 } },
+    }).graph;
+    expect(graph.nodes).toContainEqual(expect.objectContaining({ id: `file:${path}` }));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:deployment", to: `file:${path}`, kind: "implements" }));
+  });
+
   it("does not create a self-import edge from an import example", () => {
     const withSelfImport: RepositoryStructure = {
       ...structure,

@@ -15,15 +15,38 @@ function moduleMap(facts: FactsSnapshot): string {
     : "- No stable top-level modules were detected; start with the nearest implementation, caller, and test.";
 }
 
+function priorityRules(facts: FactsSnapshot, references: ReferenceDocument[]): string {
+  const knownPaths = new Set([...(facts.stack.sourcePaths ?? []), ...(facts.stack.documentationPaths ?? []), ...(facts.structure?.scopePaths ?? [])]);
+  const ranked = references.flatMap((reference, index) => {
+    const sections = ["Invariants", "Anti-patterns"].flatMap((heading) => {
+      const body = reference.markdown.match(new RegExp(`^## ${heading}\\s*\\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, "mu"))?.[1] ?? "";
+      return body.split("\n").filter((line) => /^[-*] /u.test(line));
+    });
+    const grounded = sections.find((line) => {
+      const paths = [...line.matchAll(/`([^`]+)`/gu)].map((match) => match[1]?.replace(/:\d+(?:-\d+)?$/u, ""));
+      return paths.some((path) => path && knownPaths.has(path));
+    });
+    if (!grounded) return [];
+    const score = /auth|secur|tenant|session|persist|idempoten|public|contract|critical|protected/iu.test(`${reference.title} ${grounded}`) ? 1 : 0;
+    return [{ index, score, markdown: `- ${grounded.replace(/^[-*] /u, "")} ([${reference.title}](../references/${reference.slug}.md))` }];
+  }).sort((left, right) => right.score - left.score || left.index - right.index);
+  return ranked.slice(0, 5).map((item) => item.markdown).join("\n");
+}
+
 export function agentPackDocuments(facts: FactsSnapshot, references: ReferenceDocument[]): AgentPackDocument[] {
   const commands = facts.stack.validationCommands?.length
     ? facts.stack.validationCommands.map((command) => `- \`${command}\``).join("\n")
     : "- Inspect checked-in task configuration; no verified command was detected.";
   const referenceMap = references.length
-    ? references.map((reference) => `- [${reference.title}](../references/${reference.slug}.md) — applies to ${referenceScopes(reference).map((scope) => `\`${scope}\``).join(", ")}.`).join("\n")
+    ? references.map((reference) => {
+      const scopes = referenceScopes(reference);
+      const shown = scopes.slice(0, 2).map((scope) => `\`${scope}\``).join(", ");
+      return `- [${reference.title}](../references/${reference.slug}.md) — ${shown}${scopes.length > 2 ? `, and ${scopes.length - 2} more scoped path(s)` : ""}.`;
+    }).join("\n")
     : "- No focused reference guide was generated; use the root contract and local instructions.";
   const activeGates = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
   const protectedMethods = protectedMethodsFromDirectives(facts.directives);
+  const rules = priorityRules(facts, references);
   const maintenanceMap = references.map((reference) => {
     const triggers = reference.markdown.match(/^## Maintenance triggers\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/mu)?.[1]?.trim();
     const firstTrigger = triggers?.split("\n").map((line) => line.trim()).find((line) => line && !line.startsWith("#"));
@@ -52,6 +75,8 @@ ${referenceMap}
 ${protectedMethods.length ? `Maintainer directives protect these named methods: ${protectedMethods.map((method) => `\`${method}\``).join(", ")}. Follow their exact approval requirement before editing.` : "No named protected method was found in the maintainer directives."}
 
 ${activeGates.length ? `Active path gates are linked from the root \`AGENTS.md\` and listed in [CRITICAL.md](../CRITICAL.md). Follow the [critical change audit](critical-change-audit.md) after explicit approval.` : "Review the root directives and proposed critical paths before changing a shared contract."}
+
+${rules ? `## Grounded invariants for high-impact work\n\n${rules}\n\nRead the linked guide before editing its scope; these excerpts do not replace the root directives or the full guide.\n` : ""}
 
 ## Updating this agent pack
 

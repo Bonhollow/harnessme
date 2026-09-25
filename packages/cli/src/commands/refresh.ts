@@ -21,7 +21,7 @@ import {
   defaultFeatureOverrides,
   defaultFeaturePack,
 } from "@harnessme/core";
-import { analyzeProject, authorHarnessWithAi, criticalCandidates, protectedEntryCandidates } from "@harnessme/analyzers";
+import { analyzeProject, authorHarnessWithAi, citedScopePaths, criticalCandidates, protectedEntryCandidates } from "@harnessme/analyzers";
 import { referenceDocuments, renderAgentsMd, syncHarness } from "@harnessme/renderers";
 import { createProgress, info, warn } from "../output.js";
 import { projectRoot } from "../project.js";
@@ -216,6 +216,11 @@ export default defineCommand({
       generatedAt: analysis.structure?.generatedAt ?? new Date().toISOString(),
       features: validatedFeatures,
     };
+    if (analysis.structure) analysis.structure.scopePaths = citedScopePaths(
+      analysis,
+      validatedFeatures,
+      authoredResult?.references ?? previous.referencePack?.documents ?? [],
+    );
     if (analysis.structure) {
       const candidateSnapshot: FactsSnapshot = {
         ...previous,

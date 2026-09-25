@@ -68,12 +68,13 @@ The complete command and critical-change workflow reference is available further
 ## What you get
 
 - A concise root `AGENTS.md` that directs agents before they edit.
-- A canonical `.harnessme/agent-pack/agent.md` that routes agents to task-relevant references and names protected boundaries and maintenance triggers. The detailed generated operating contract lives in `.harnessme/agent-pack/contract.md`; imported maintainer rules stay in the root file.
-- Nested module guides that automatically combine scoped Markdown guidance with graph-derived owners, dependencies, tests, and exact validation.
+- A canonical `.harnessme/agent-pack/agent.md` that routes agents to task-relevant references, names protected boundaries, and surfaces up to five source-grounded invariants. The detailed generated operating contract lives in `.harnessme/agent-pack/contract.md`; imported maintainer rules stay in the root file.
+- Short nested module guides that link scoped references and direct agents to `harnessme context <path>` for owners, dependencies, and tests.
 - `.harnessme/CRITICAL.md`, its machine-readable `.harnessme/critical.json` companion, rollback guidance, and enforceable gates for core, security, persistence, billing, deployment, and public-contract changes.
 - Provider files for Codex, Claude Code, Claude Desktop, Cursor, PR-Agent, and other selected agent formats.
-- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, context-delivery coverage, dependency density, test linkage, guide depth, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
+- A critical dashboard and `harnessme quality` scorecard with five weighted dimensions, evidence breadth, semantic file coverage, context-delivery coverage, dependency density, test linkage, guide depth, generated-link integrity, assessment confidence, historical score and dimension trends, ranked findings, and executable remediation plans with projected score recovery. Initialization alone cannot earn 100; comprehensive evidence and navigation coverage must be demonstrated.
 - A version-controlled `.harnessme/knowledge-graph.json`, agent-facing feature map, and terminal explorer with structured and force-directed views.
+- Existing configuration, deployment, and documentation paths can ground AI-reviewed feature scopes; only cited and bounded representative paths enter the generated graph.
 
 ## Requirements
 
@@ -292,6 +293,8 @@ npm run lint
 npm test
 npm run test:package
 ```
+
+To compare coding-agent task outcomes, use `python3 scripts/benchmark_agents.py --manifest /private/manifest.json --output /private/results`. The opt-in manifest names local repositories, historical base and fix commits, task prompts, hidden gold test files, verifier commands, and baseline/candidate setup commands. Keep manifests and results outside this public repository. The runner checks out only each task's base commit, runs Codex before restoring gold tests, and writes JSONL events, verifier logs, token counts, and a result table to the private output directory. Review pass/fail and protected edits before making a release decision.
 
 ## License
 

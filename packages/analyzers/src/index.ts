@@ -11,6 +11,7 @@ export {
 export {
   AuthoredHarnessValidationError,
   authorHarnessWithAi,
+  citedScopePaths,
   type AuthoredHarnessResult,
 } from "./harness-author.js";
 export * from "./documentation.js";

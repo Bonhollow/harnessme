@@ -23,6 +23,7 @@ import { createImportResolver } from "./import-resolver.js";
 import { isPythonPackageMarker } from "./source-classification.js";
 
 const sourcePatterns = ["**/*.{bash,c,cc,cpp,cs,css,cxx,go,h,hpp,java,js,jsx,mjs,cjs,php,ps1,py,rb,rs,sh,ts,tsx}"];
+const scopePatterns = ["**/*"];
 const languageByExtension: Record<string, string> = {
   ".bash": "Shell",
   ".c": "C",
@@ -89,6 +90,14 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     cwd: root,
     onlyFiles: true,
     unique: true,
+    ignore: exclude,
+    followSymbolicLinks: false,
+  });
+  const scopePaths = await fg(scopePatterns, {
+    cwd: root,
+    onlyFiles: true,
+    unique: true,
+    dot: true,
     ignore: exclude,
     followSymbolicLinks: false,
   });
@@ -273,6 +282,7 @@ export async function analyzeProject(options: AnalyzeOptions): Promise<AnalysisR
     aiInputs,
     authorContext,
     sourceFiles: [...new Set(files.map(posixPath))].sort(),
+    scopePaths: scopePaths.map(posixPath).sort(),
     commands: packageData.commands,
     documentationConflicts: [...documentation.conflicts, ...inferredConflicts]
       .filter((item, index, items) => items.findIndex((candidate) =>

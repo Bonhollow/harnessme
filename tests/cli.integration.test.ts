@@ -183,10 +183,11 @@ describe("CLI", () => {
     const generated = await readFile(path, "utf8");
     expect(generated).toContain("Scoped agent guidance");
     expect((await execWithInput(process.execPath, [cli, "check", "--root", root], "")).code).toBe(0);
-    await writeFile(path, `${generated}\nUnreviewed scoped rule.\n`);
+    await writeFile(path, `${generated}\n[Unreviewed scoped rule](missing-guide.md).\n`);
     const drift = await execWithInput(process.execPath, [cli, "check", "--root", root], "");
     expect(drift.code).toBe(1);
     expect(drift.stdout).toContain("src/auth/AGENTS.md differs from canonical stored facts");
+    expect(drift.stdout).toContain("src/auth/AGENTS.md links to missing or out-of-repository target missing-guide.md");
   });
 
   it("detects removal or editing of the generated CI gate", async () => {
@@ -1128,8 +1129,8 @@ console.log(JSON.stringify({ result: JSON.stringify(value) }));
     expect(context.stdout).toContain(".harnessme/features/authentication.md");
     expect(context.stdout).toContain("tests/auth.test.ts");
     const scopedInstructions = await readFile(join(root, "src", "AGENTS.md"), "utf8");
-    expect(scopedInstructions).toContain("## Graph-routed context");
-    expect(scopedInstructions).toContain("Authentication (feature)");
+    expect(scopedInstructions).toContain("harnessme context <path>");
+    expect(scopedInstructions).toContain(".harnessme/references/authentication.md");
     const graph = JSON.parse(await readFile(join(root, ".harnessme", "knowledge-graph.json"), "utf8")) as { nodes: Array<{ id: string }>; edges: Array<{ from: string; to: string; kind: string }> };
     expect(graph.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "feature:authentication" }), expect.objectContaining({ id: "feature:sessions" })]));
     expect(graph.edges).toContainEqual(expect.objectContaining({ from: "feature:authentication", to: "feature:sessions", kind: "depends-on" }));

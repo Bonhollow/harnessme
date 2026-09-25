@@ -1,16 +1,8 @@
-import { renderChangeContext, resolveChangeContext, type FactsSnapshot, type ReferenceDocument } from "../../../core/src/index.js";
+import type { FactsSnapshot, ReferenceDocument } from "../../../core/src/index.js";
 import { concernReferenceDocuments, guidanceDirectory } from "./concerns.js";
-import { referenceScopes, scopeMatchesPath } from "./scopes.js";
+import { referenceScopes } from "./scopes.js";
 
 export interface NestedAgentDocument { directory: string; markdown: string }
-
-function section(markdown: string, heading: string): string {
-  const start = markdown.indexOf(`## ${heading}`);
-  if (start < 0) return "";
-  const bodyStart = start + heading.length + 3;
-  const next = markdown.slice(bodyStart).search(/^##\s+/mu);
-  return markdown.slice(bodyStart, next < 0 ? undefined : bodyStart + next).trim();
-}
 
 function referenceDirectory(scope: string): string | undefined {
   const directory = scope.replace(/\/\*\*.*$/u, "").replace(/\/$/u, "");
@@ -18,7 +10,7 @@ function referenceDirectory(scope: string): string | undefined {
 }
 
 function referenceDirectories(facts: FactsSnapshot, reference: ReferenceDocument): string[] {
-  const sourcePaths = new Set(facts.stack.sourcePaths ?? []);
+  const sourcePaths = new Set([...(facts.stack.sourcePaths ?? []), ...(facts.structure?.scopePaths ?? [])]);
   const documentationPaths = new Set(facts.stack.documentationPaths ?? []);
   const citedPaths = [...reference.markdown.matchAll(/`([^`]+)`/gu)]
     .map((match) => match[1]?.replace(/:\d+$/u, ""))
@@ -29,7 +21,7 @@ function referenceDirectories(facts: FactsSnapshot, reference: ReferenceDocument
     if (scoped) {
       const scopedDirectory = sourcePaths.has(scoped)
         ? guidanceDirectory(scoped)
-        : documentationPaths.has(scoped) ? scoped.slice(0, scoped.lastIndexOf("/")) : scoped;
+      : documentationPaths.has(scoped) ? (scoped.includes("/") ? scoped.slice(0, scoped.lastIndexOf("/")) : undefined) : scoped;
       if (scopedDirectory) directories.add(scopedDirectory);
     }
   }
@@ -47,64 +39,31 @@ export function nestedAgentDocuments(
       groups.set(directory, [...(groups.get(directory) ?? []), reference]);
     }
   }
-  const commands = facts.stack.validationCommands ?? [];
   const activeGates = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
   return [...groups.entries()].map(([directory, documents]) => {
-    const citedLocalPaths = documents.flatMap((document) =>
-      [...document.markdown.matchAll(/`([^`]+)`/gu)]
-        .map((match) => match[1])
-        .filter((path): path is string => Boolean(path && (facts.stack.sourcePaths ?? []).includes(path) && path.startsWith(`${directory}/`))),
-    );
-    const localPaths = [...new Set([
-      ...citedLocalPaths,
-      ...(facts.stack.sourcePaths ?? []).filter((path) => path.startsWith(`${directory}/`)),
-    ])].slice(0, 12);
-    const localRules = documents.map((document) => {
-      const responsibilities = section(document.markdown, "Responsibilities");
-      const extensionSeams = section(document.markdown, "Extension seams");
-      const invariants = section(document.markdown, "Invariants");
-      const antiPatterns = section(document.markdown, "Anti-patterns");
-      const body = [responsibilities, extensionSeams, invariants, antiPatterns].filter(Boolean).join("\n\n");
-      return body ? `### ${document.title}\n\n${body}` : "";
-    }).filter(Boolean).join("\n\n");
-    const gates = activeGates.filter((entry) => scopeMatchesPath(`${directory}/**`, entry.glob.replace(/\*.*$/u, ""))
-      || entry.glob.startsWith(`${directory}/`));
-    const graphContext = facts.knowledgeGraph && localPaths.length
-      ? renderChangeContext(resolveChangeContext(facts, localPaths), { compact: true, pathPrefix: "../".repeat(directory.split("/").length) })
-      : "## Graph-routed context\n\n- No graph context is available; run `harnessme refresh` after structural changes.\n";
+    const prefix = "../".repeat(directory.split("/").length);
+    const gates = activeGates.filter((entry) => entry.glob.startsWith(`${directory}/`));
     return {
       directory,
       markdown: `# Scoped agent guidance
 
-This file adds rules for \`${directory}/\`. Read the repository root \`AGENTS.md\` first.
+This file applies to \`${directory}/\`. Read the repository root \`AGENTS.md\` and its project directives first.
 
 ## Applicable guides
 
-${documents.map((document) => `- [${document.title}](${"../".repeat(directory.split("/").length)}.harnessme/references/${document.slug}.md): ${document.description}`).join("\n")}
-
-${graphContext.trim()}
-
-## Local ownership
-
-Start from these detected owning paths before adding a new implementation seam:
-${localPaths.length ? localPaths.map((path) => `- \`${path}\``).join("\n") : `- Inspect the nearest implementation and tests under \`${directory}/\`; do not create a parallel implementation.`}
-
-## Local operating rules
-
-${localRules || "- Preserve the local interface and update coupled consumers together.\n- Use the existing implementation seam; do not create a parallel path around it."}
+${documents.map((document) => `- [${document.title}](${prefix}.harnessme/references/${document.slug}.md): ${document.description}`).join("\n")}
 
 ## Change workflow
 
-1. Read the applicable guide above, then trace the owning method or type, direct callers, focused tests, and task-relevant documentation.
-2. Make the smallest change through the existing seam; update coupled consumers, registrations, and contracts in the same change.
-3. Update the applicable reference document when this change establishes or changes a canonical local workflow, invariant, extension seam, or validation rule.
-4. Run the relevant verified checks: ${commands.length ? commands.map((command) => `\`${command}\``).join(", ") : "inspect checked-in task configuration before choosing validation"}.
+1. Read the task-relevant guide above. Use \`harnessme context <path>\` to find the owner, dependencies, and focused tests for a changed file.
+2. Inspect the implementation and callers, then change behavior through its existing extension seam. Update coupled consumers and tests.
+3. Update the relevant guide when a canonical local workflow, invariant, or extension seam changes. Run focused tests and the verified commands in the root guide.
 
 ## Critical changes
 
 ${gates.length
-  ? `Before editing any protected path below, stop and obtain explicit developer confirmation. After confirmation, create a critical record with \`harnessme critical draft <path> --summary "..."\`, then include impact, validation, and rollback notes in the approved record.\n\n${gates.map((entry) => `- \`${entry.glob}\` [${entry.risk ?? "other"}]: ${entry.reason}`).join("\n")}`
-  : "If a task reaches a root-level critical path, stop for explicit developer confirmation. Record any confirmed invasive change with its behavior impact, validation, and rollback plan."}
+  ? `These active gates require explicit developer confirmation before editing. After confirmation, follow [the critical change audit](${prefix}.harnessme/agent-pack/critical-change-audit.md), including the approved record, impact, validation, and rollback notes.\n\n${gates.map((entry) => `- \`${entry.glob}\` [${entry.risk ?? "other"}]: ${entry.reason}`).join("\n")}`
+  : "Root-level critical paths still require explicit developer confirmation before editing. Follow the root contract and critical change audit."}
 `,
     };
   });

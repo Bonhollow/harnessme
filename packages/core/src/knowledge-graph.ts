@@ -76,14 +76,14 @@ function graphSummaryItems(markdown: string, heading: string): string[] {
 function featureFromReference(reference: ReferencePack["documents"][number], structure: RepositoryStructure): FeatureDefinition | undefined {
   const required = ["Responsibilities", "Invariants", "Validation"];
   if (!required.every((heading) => reference.markdown.includes(`## ${heading}`))) return undefined;
-  const known = new Set([...structure.files.map((item) => item.path), ...structure.documents]);
+  const known = new Set([...structure.files.map((item) => item.path), ...structure.documents, ...structure.scopePaths ?? []]);
   const citations = [...reference.markdown.matchAll(/`([^`\n]+):(\d+)`/gu)]
     .map((match) => ({ path: match[1]!, line: Number(match[2]) }))
     .filter((citation, index, all) => safePath(citation.path) && known.has(citation.path)
       && all.findIndex((item) => item.path === citation.path && item.line === citation.line) === index);
   if (!citations.length) return undefined;
   const scopes = (reference.scopes ?? [reference.scope]).map((scope) => scope.endsWith("/") ? `${scope}**` : scope);
-  if (!scopes.some((scope) => structure.files.some((file) => matches(file.path, scope)))) return undefined;
+  if (!scopes.some((scope) => [...structure.files.map((file) => file.path), ...structure.scopePaths ?? []].some((path) => matches(path, scope)))) return undefined;
   return FeatureDefinitionSchema.parse({
     slug: reference.slug,
     kind: "concern",
@@ -289,6 +289,10 @@ export function createKnowledgeArtifacts(input: KnowledgeArtifactsInput): Knowle
       addEdge({ from: moduleId, to: id, kind: "contains", provenance: "deterministic", citations: [{ path: item.path, line: 1 }] });
     }
   }
+  for (const path of input.structure.scopePaths ?? []) {
+    if (nodes.has(`file:${path}`) || nodes.has(`test:${path}`) || nodes.has(`document:${path}`)) continue;
+    addNode({ id: `file:${path}`, kind: "file", label: path.split("/").at(-1) ?? path, path, provenance: "deterministic", citations: [{ path, line: 1 }] });
+  }
   for (const item of input.structure.imports) {
     const from = `${input.structure.files.find((file) => file.path === item.from)?.kind === "test" ? "test" : "file"}:${item.from}`;
     const to = `${input.structure.files.find((file) => file.path === item.to)?.kind === "test" ? "test" : "file"}:${item.to}`;
@@ -328,7 +332,10 @@ export function createKnowledgeArtifacts(input: KnowledgeArtifactsInput): Knowle
     addNode({ id, kind: feature.kind, label: feature.title, summary: feature.summary, guide, provenance: provenance.get(feature.slug) ?? "ai-reviewed", citations: feature.citations });
     addNode({ id: `document:${guide}`, kind: "document", label: `${feature.title} guide`, path: guide, provenance: "deterministic", citations: [] });
     addEdge({ from: id, to: `document:${guide}`, kind: "documented-by", provenance: "deterministic", citations: [] });
-    const matched = input.structure.files.filter((file) => feature.scopes.some((scope) => matches(file.path, scope)));
+    const matched = [
+      ...input.structure.files,
+      ...(input.structure.scopePaths ?? []).map((path) => ({ path, kind: "source" as const })),
+    ].filter((file) => feature.scopes.some((scope) => matches(file.path, scope)));
     if (!matched.length) diagnostics.push({ severity: "error", code: "empty-feature-scope", message: `${feature.title} has no matching repository files.` });
     for (const file of matched) {
       addEdge({ from: id, to: `${file.kind === "test" ? "test" : "file"}:${file.path}`, kind: file.kind === "test" ? "verified-by" : "implements", provenance: provenance.get(feature.slug) ?? "ai-reviewed", citations: feature.citations });

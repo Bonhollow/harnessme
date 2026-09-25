@@ -5,6 +5,7 @@ import { analyzeProject, protectedEntryCandidates } from "@harnessme/analyzers";
 import { agentPackDocuments, extractPending, GENERATED_MARKER, nestedAgentDocuments, referenceDocuments, renderEntrypointMd } from "@harnessme/renderers";
 import { createProgress, info, warn } from "../output.js";
 import { projectRoot } from "../project.js";
+import { auditGuidanceLinks } from "../guidance-links.js";
 
 export async function scan(root: string, onPhase?: (message: string) => void): Promise<ReturnType<typeof detectDrift>> {
   onPhase?.("Loading the committed harness facts");
@@ -43,14 +44,17 @@ export async function scan(root: string, onPhase?: (message: string) => void): P
     drift.push({ severity: "error", category: "governance", message: `${workflowPath} differs from canonical generated CI gate; run \`harnessme sync\`.` });
   }
   const references = referenceDocuments(facts);
+  const generatedMarkdown = ["AGENTS.md"];
   for (const reference of references) {
     const path = `.harnessme/references/${reference.slug}.md`;
+    generatedMarkdown.push(path);
     const expected = `${GENERATED_MARKER}\n${reference.markdown.trim()}\n`;
     if (!await exists(join(root, path)) || await readText(join(root, path)) !== expected) {
       drift.push({ severity: "error", category: "guidance", message: `${path} differs from canonical stored facts; run \`harnessme sync\`.` });
     }
   }
   for (const document of agentPackDocuments(facts, references)) {
+    generatedMarkdown.push(document.path);
     const expected = `${GENERATED_MARKER}\n${document.markdown.trim()}\n`;
     if (!await exists(join(root, document.path)) || await readText(join(root, document.path)) !== expected) {
       drift.push({ severity: "error", category: "guidance", message: `${document.path} differs from canonical stored facts; run \`harnessme sync\`.` });
@@ -63,10 +67,12 @@ export async function scan(root: string, onPhase?: (message: string) => void): P
         const path = `${document.directory}/AGENTS.md`;
         const current = await exists(join(root, path)) ? await readText(join(root, path)) : undefined;
         if (current && !current.startsWith(GENERATED_MARKER)) continue;
+        generatedMarkdown.push(path);
         const expected = `${GENERATED_MARKER}\n${document.markdown.trim()}\n`;
         if (current !== expected) drift.push({ severity: "error", category: "guidance", message: `${path} differs from canonical stored facts; run \`harnessme sync\`.` });
       }
       for (const document of artifacts.documents) {
+        if (document.path.endsWith(".md")) generatedMarkdown.push(document.path);
         const path = join(root, document.path);
         const expected = document.markdown.endsWith("\n") ? document.markdown : `${document.markdown}\n`;
         if (!await exists(path) || await readText(path) !== expected) drift.push({ severity: "error", category: "graph", message: `${document.path} differs from canonical graph facts; run \`harnessme sync\`.` });
@@ -74,6 +80,9 @@ export async function scan(root: string, onPhase?: (message: string) => void): P
     } catch (error) {
       drift.push({ severity: "error", category: "graph", message: error instanceof Error ? error.message : String(error) });
     }
+  }
+  for (const issue of await auditGuidanceLinks(root, generatedMarkdown)) {
+    drift.push({ severity: "error", category: "guidance", message: `${issue.source} links to missing or out-of-repository target ${issue.target}.` });
   }
   return drift;
 }

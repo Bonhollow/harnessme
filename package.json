@@ -59,7 +59,7 @@
     "gray-matter": "4.0.3",
     "ignore": "7.0.5",
     "js-yaml": "4.3.2",
-    "lefthook": "2.1.12",
+    "lefthook": "2.1.14",
     "minimatch": "10.2.6",
     "web-tree-sitter": "0.27.0",
     "zod": "4.5.4"

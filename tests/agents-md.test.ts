@@ -82,11 +82,13 @@ describe("AGENTS.md renderer", () => {
     const entrypoint = renderEntrypointMd(facts, "- 2026-09-07: changed `src/a.ts`");
     expect(entrypoint).toContain("Never commit credentials.");
     expect(entrypoint).toContain("`start_server()`, `Runner.run()`, `initialize_core()`");
+    expect(entrypoint).toContain("foundational startup or orchestration entry method");
+    expect(entrypoint).toContain("obtain explicit developer confirmation");
     expect(entrypoint).toContain(".harnessme/agent-pack/agent.md");
+    expect(entrypoint).toContain("Read this file, then [the canonical agent contract](.harnessme/agent-pack/agent.md)");
     expect(entrypoint).toContain("For a local fix with a clear owner");
     expect(entrypoint).toContain("a local case within an existing rule needs no note");
     expect(entrypoint).toContain("Run `harnessme validate` after adding a pending note");
-    expect(entrypoint).not.toContain("Read [the canonical agent contract]");
     expect(entrypoint).toContain("changed `src/a.ts`");
     expect(extractPending(entrypoint)).toBe("- 2026-09-07: changed `src/a.ts`");
     expect(entrypoint).not.toContain("## Repository map");
@@ -99,6 +101,7 @@ describe("AGENTS.md renderer", () => {
     }]).find((document) => document.path.endsWith("/agent.md"));
     expect(guide?.markdown).toContain("Core](../references/core.md): Update this guide when the public interface changes.");
     facts.stack.sourcePaths = ["src/a.ts"];
+    facts.generation = { status: "ai-reviewed", generatedAt: facts.stack.generatedAt, activatedGates: [] };
     const grounded = agentPackDocuments(facts, [{
       slug: "auth",
       title: "Authentication",
@@ -108,6 +111,11 @@ describe("AGENTS.md renderer", () => {
     }]).find((document) => document.path.endsWith("/agent.md"));
     expect(grounded?.markdown).toContain("Preserve session isolation in `src/a.ts`.");
     expect(grounded?.markdown).not.toContain("Do not invent a rule for `src/missing.ts`.");
+    const unreviewed = agentPackDocuments({ ...facts, generation: { status: "deterministic", generatedAt: facts.stack.generatedAt, activatedGates: [] } }, [{
+      slug: "raw", title: "Raw source", scope: "src/**", description: "Syntax evidence",
+      markdown: "# Raw source\n\n## Invariants\n\n- Preserve the observed contract at `src/a.ts:1`: import a.\n",
+    }]).find((document) => document.path.endsWith("/agent.md"));
+    expect(unreviewed?.markdown).not.toContain("Preserve the observed contract at");
     const detailed = agentPackDocuments(facts, []).find((document) => document.path.endsWith("/contract.md"));
     expect(detailed?.markdown).toContain("](../FEATURES.md)");
     expect(detailed?.markdown).not.toContain("](.harnessme/FEATURES.md)");

@@ -60,7 +60,7 @@ export function discoverGuidanceConcerns(facts: FactsSnapshot): GuidanceConcern[
 export function concernReferenceDocuments(facts: FactsSnapshot): ReferenceDocument[] {
   const commands = facts.stack.validationCommands ?? [];
   return discoverGuidanceConcerns(facts).slice(0, 20).map((concern) => {
-    const citations = concern.evidence.map((item) => `- Preserve the observed contract at \`${item.path}:${item.line}\`: ${item.excerpt}`).join("\n");
+    const citations = concern.evidence.map((item) => `- Inspect \`${item.path}:${item.line}\` before changing the owning behavior; this citation alone does not establish an invariant.`).join("\n");
     const ownership = concern.paths.slice(0, 12).map((path) => `- \`${path}\``).join("\n")
       + (concern.paths.length > 12 ? `\n- ${concern.paths.length - 12} additional scoped path(s) are indexed in the knowledge graph; use \`harnessme context <path>\` for the changed file.` : "");
     const validation = commands.length ? commands.map((command) => `- \`${command}\``).join("\n") : "- Run the nearest verified repository check.";
@@ -93,8 +93,11 @@ ${ownership}
 
 ## Invariants
 
-${citations || "- No semantic invariant was verified deterministically; inspect the ownership map and nearby tests before changing behavior."}
-- Preserve public behavior and update coupled consumers together.
+No behavioral invariant was verified deterministically. Inspect the implementation, callers, and tests before defining one.
+
+## Evidence to inspect
+
+${citations || "- Inspect the ownership map and nearby tests before changing behavior."}
 
 ## Change impact
 

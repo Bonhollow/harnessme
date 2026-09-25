@@ -46,7 +46,9 @@ export function agentPackDocuments(facts: FactsSnapshot, references: ReferenceDo
     : "- No focused reference guide was generated; use the root contract and local instructions.";
   const activeGates = facts.criticalPaths.paths.filter((entry) => entry.status === "active");
   const protectedMethods = protectedMethodsFromDirectives(facts.directives);
-  const rules = priorityRules(facts, references);
+  // Deterministic citations often describe syntax (imports or declarations), not
+  // a behavioral contract. Only reviewed references supply excerpted rules.
+  const rules = facts.generation?.status === "ai-reviewed" ? priorityRules(facts, references) : "";
   const maintenanceMap = references.map((reference) => {
     const triggers = reference.markdown.match(/^## Maintenance triggers\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/mu)?.[1]?.trim();
     const firstTrigger = triggers?.split("\n").map((line) => line.trim()).find((line) => line && !line.startsWith("#"));
@@ -71,6 +73,8 @@ This is the canonical generated guide for changing this repository. The root \`A
 ${referenceMap}
 
 ## Protected boundaries
+
+Foundational startup or orchestration entry methods, model or prompt factories, tool registrars, request or authentication handlers, persisted state contracts, and public event mappers require exact developer confirmation before editing. Explain why an established extension seam is insufficient. If the path has no active gate, register one before editing and follow the [critical change audit](critical-change-audit.md).
 
 ${protectedMethods.length ? `Maintainer directives protect these named methods: ${protectedMethods.map((method) => `\`${method}\``).join(", ")}. Follow their exact approval requirement before editing.` : "No named protected method was found in the maintainer directives."}
 
@@ -124,7 +128,7 @@ ${commands}
 
 ## When this applies
 
-Use this process only after the developer explicitly confirms an edit to a protected path. The agent cannot self-approve or treat a draft as approval.
+Use this process after the developer explicitly confirms an edit to a protected path or foundational entry method or core infrastructure contract. Register an active gate for a newly identified boundary before editing. The agent cannot self-approve or treat a draft as approval.
 
 ## Required workflow
 

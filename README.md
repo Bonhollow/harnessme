@@ -83,6 +83,8 @@ HarnessME requires Node.js 26.4 or newer on Windows, macOS, or Linux. The dashbo
 
 For model-assisted generation, install and sign in to at least one supported framework CLI: Codex, Claude Code, or Cursor. Use `--deterministic` when you want a fully local run without model inference.
 
+HarnessME verifies the selected CLI's login status before inference. For Cursor, run `agent status` and `agent --list-models` if the provider is unavailable, then update or log in with the Cursor Agent CLI. The `cursor-agent` command is also supported; a different program named `agent` is ignored. Cursor may return an error inside an otherwise successful JSON process result; HarnessME reports that error directly. Cursor-assisted initialization makes several model calls and can take minutes per phase. For slow or model-specific behavior, pass an available model ID with `--model`; `--council-size 1` reduces the number of review calls.
+
 <details>
 <summary><strong>How HarnessME creates and reviews the harness</strong></summary>
 

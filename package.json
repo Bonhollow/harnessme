@@ -1,6 +1,6 @@
 {
   "name": "harnessme",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "description": "Derive, distribute, and govern AI coding-agent instructions from the codebase itself.",
   "repository": {
     "type": "git",
@@ -55,6 +55,7 @@
     "@opentui/core": "0.5.11",
     "@vscode/tree-sitter-wasm": "0.3.1",
     "citty": "0.2.2",
+    "cross-spawn": "^7.0.6",
     "fast-glob": "3.3.3",
     "gray-matter": "4.0.3",
     "ignore": "7.0.5",
@@ -65,6 +66,7 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/js-yaml": "4.0.9",
     "@types/node": "26.5.0",
     "tsup": "8.5.0",

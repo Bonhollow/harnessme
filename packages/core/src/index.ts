@@ -16,3 +16,4 @@ export * from "./graph-query.js";
 export * from "./change-context.js";
 export * from "./preflight.js";
 export * from "./directives.js";
+export * from "./staged-repository.js";

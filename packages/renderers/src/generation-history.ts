@@ -3,7 +3,7 @@ import { cp, mkdtemp, readdir, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { z } from "zod";
-import { atomicWrite, exists, harnessDir, posixPath, readJson, readText, writeJson } from "../../core/src/index.js";
+import { atomicWrite, exists, harnessDir, posixPath, readJson, readText, stageRepositoryMutation, writeJson } from "../../core/src/index.js";
 import { extractPending, GENERATED_MARKER, PENDING_END, PENDING_START } from "./agents-md.js";
 import { providers } from "./providers.js";
 
@@ -192,7 +192,7 @@ export async function previewGenerationRollback(root: string, id?: string): Prom
   }
 }
 
-export async function rollbackGeneration(root: string, id?: string): Promise<{ generation: GenerationSummary; changes: GenerationChange[] }> {
+async function rollbackGenerationInPlace(root: string, id?: string): Promise<{ generation: GenerationSummary; changes: GenerationChange[] }> {
   const preview = await previewGenerationRollback(root, id);
   const target = await loadSnapshot(root, preview.generation.id);
   await captureGeneration(root, "before-rollback");
@@ -207,6 +207,10 @@ export async function rollbackGeneration(root: string, id?: string): Promise<{ g
   }
   await captureGeneration(root, "rollback", target.trackedPaths);
   return preview;
+}
+
+export async function rollbackGeneration(root: string, id?: string): Promise<{ generation: GenerationSummary; changes: GenerationChange[] }> {
+  return stageRepositoryMutation(root, (stagedRoot) => rollbackGenerationInPlace(stagedRoot, id));
 }
 
 export async function previewHarnessSync(root: string, targetIds?: string[]): Promise<GenerationChange[]> {

@@ -17,6 +17,7 @@ import {
   readText,
   resolveChangeContext,
   resolveRepositoryPreflight,
+  stageRepositoryMutation,
 } from "@harnessme/core";
 import { nonCodingClientInstructions } from "@harnessme/renderers";
 import { projectRoot } from "../project.js";
@@ -163,13 +164,16 @@ export function createHarnessMcpServer(root: string): McpServer {
     annotations: { readOnlyHint: false, destructiveHint: false },
   }, async ({ text }) => {
     try {
-      const path = join(harnessDir(root), "facts", "directives.md");
-      const current = await readText(path);
-      await atomicWrite(path, `${current.trimEnd()}\n\n## ${new Date().toISOString().slice(0, 10)}\n\n${text.trim()}\n`);
-      // Ruler writes progress directly to stdout. Run synchronization in a child so
-      // its output cannot corrupt this process's JSON-RPC stdout transport.
-      const execution = await runHarnessCommand(root, ["sync", "--root", root]);
-      if (execution.code !== 0) throw new Error(`HarnessME sync failed (exit ${execution.code}): ${execution.stderr.trim().slice(-2_000)}`);
+      const execution = await stageRepositoryMutation(root, async (stagedRoot) => {
+        const path = join(harnessDir(stagedRoot), "facts", "directives.md");
+        const current = await readText(path);
+        await atomicWrite(path, `${current.trimEnd()}\n\n## ${new Date().toISOString().slice(0, 10)}\n\n${text.trim()}\n`);
+        // Ruler writes progress directly to stdout. Run synchronization in a child so
+        // its output cannot corrupt this process's JSON-RPC stdout transport.
+        const synchronized = await runHarnessCommand(stagedRoot, ["sync", "--root", stagedRoot]);
+        if (synchronized.code !== 0) throw new Error(`HarnessME sync failed (exit ${synchronized.code}): ${synchronized.stderr.trim().slice(-2_000)}`);
+        return synchronized;
+      });
       return result({ updated: ".harnessme/facts/directives.md", synchronized: true, diagnostics: execution.stderr.trim() });
     } catch (error) { return failure(error); }
   });

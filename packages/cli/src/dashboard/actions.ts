@@ -1,8 +1,10 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { discoverAvailableModels, resolveInferenceProvider, type InferenceProviderId } from "@harnessme/analyzers";
-import { harnessDir, readFacts, writeYaml, type AiFallbackConfig } from "@harnessme/core";
+import { harnessDir, readFacts, stageRepositoryMutation, writeYaml, type AiFallbackConfig } from "@harnessme/core";
+import { activate as activateCriticalCommand, add as addCriticalCommand, remove as removeCriticalCommand } from "../commands/critical.js";
 import { withOutputSink } from "../output.js";
+import type { GatePlan } from "./gate-plan.js";
 
 export interface InferenceChoice {
   deterministic: boolean;
@@ -54,6 +56,13 @@ export async function configureInference(root: string, choice: InferenceChoice):
   await writeYaml(join(harnessDir(root), "harnessme.yaml"), facts.config);
 }
 
+export async function configureAndRefreshInference(root: string, choice: InferenceChoice, refresh: (stagedRoot: string) => Promise<void>): Promise<void> {
+  await stageRepositoryMutation(root, async (stagedRoot) => {
+    await configureInference(stagedRoot, choice);
+    await refresh(stagedRoot);
+  });
+}
+
 export async function runDashboardCommand(
   root: string,
   command: DashboardCommand,
@@ -69,6 +78,17 @@ export async function runDashboardCommand(
   }, async () => {
     await command.run?.({ args: { ...args, root }, rawArgs: {}, cmd: command });
   });
+}
+
+export async function runGatePlanInPlace(root: string, plan: GatePlan, onOutput: OperationOutput): Promise<void> {
+  for (const glob of plan.activate) await runDashboardCommand(root, activateCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
+  for (const glob of plan.remove) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
+  for (const glob of plan.dismiss) await runDashboardCommand(root, removeCriticalCommand, { glob, reason: plan.reasons?.[glob] }, onOutput);
+  if (plan.add) await runDashboardCommand(root, addCriticalCommand, plan.add, onOutput);
+}
+
+export async function runGatePlan(root: string, plan: GatePlan, onOutput: OperationOutput): Promise<void> {
+  await stageRepositoryMutation(root, (stagedRoot) => runGatePlanInPlace(stagedRoot, plan, onOutput));
 }
 
 export async function removeHarnessState(root: string): Promise<void> {

@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import { defineCommand } from "citty";
 import { FeatureOverridesSchema, findGraphPath, harnessDir, isTestPath, posixPath, readFacts, resolveGraphNode, writeYaml } from "@harnessme/core";
-import { syncHarness } from "@harnessme/renderers";
 import { info } from "../output.js";
 import { projectRoot } from "../project.js";
+import { updateHarness } from "../harness-update.js";
 
 function list(value: unknown): string[] {
   return typeof value === "string" ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
@@ -17,22 +17,17 @@ function safeScopes(value: unknown): string[] {
 }
 
 async function update(root: string, mutate: (overrides: ReturnType<typeof FeatureOverridesSchema.parse>, facts: Awaited<ReturnType<typeof readFacts>>) => void): Promise<void> {
-  const facts = await readFacts(root);
-  const overrides = FeatureOverridesSchema.parse(facts.featureOverrides ?? { schemaVersion: 1 });
-  mutate(overrides, facts);
-  const previous = facts.featureOverrides;
-  facts.featureOverrides = overrides;
-  try {
+  await updateHarness(root, async (stagedRoot) => {
+    const facts = await readFacts(stagedRoot);
+    const overrides = FeatureOverridesSchema.parse(facts.featureOverrides ?? { schemaVersion: 1 });
+    mutate(overrides, facts);
+    facts.featureOverrides = overrides;
     // Validate the complete merged graph before changing the maintainer-owned file.
     const { createKnowledgeArtifacts, defaultFeaturePack } = await import("@harnessme/core");
     const structure = facts.structure ?? { schemaVersion: 1 as const, generatedAt: facts.stack.generatedAt, files: (facts.stack.sourcePaths ?? []).map((path) => ({ path, kind: isTestPath(path) ? "test" as const : "source" as const })), imports: [], documents: facts.stack.documentationPaths ?? [] };
     createKnowledgeArtifacts({ structure, features: facts.featurePack ?? defaultFeaturePack(structure.generatedAt), references: facts.referencePack, criticalPaths: facts.criticalPaths, overrides, referenceProvenance: facts.generation?.status === "ai-reviewed" ? "ai-reviewed" : "deterministic" });
-    await writeYaml(join(harnessDir(root), "feature-overrides.yaml"), overrides);
-    await syncHarness(root);
-  } catch (error) {
-    facts.featureOverrides = previous;
-    throw error;
-  }
+    await writeYaml(join(harnessDir(stagedRoot), "feature-overrides.yaml"), overrides);
+  });
 }
 
 export const add = defineCommand({

@@ -414,6 +414,7 @@ describe("CLI", () => {
 const fs = require("node:fs");
 if (process.env.HARNESSME_TEST_ARGS) fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
 if (process.argv.includes("--version")) { console.log("codex-test"); process.exit(0); }
+if (process.argv.includes("login") && process.argv.includes("status")) process.exit(0);
 process.stdin.resume();
 process.stdin.on("end", () => {
   const output = process.argv[process.argv.indexOf("--output-last-message") + 1];
@@ -473,6 +474,7 @@ const value = schema.includes("harnessme_facts")
     await writeFile(fakeClaude, `#!/usr/bin/env node
 const fs = require("node:fs");
 if (process.argv.includes("--version")) { console.log("claude-test"); process.exit(0); }
+if (process.argv.includes("auth") && process.argv.includes("status")) process.exit(0);
 fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
 const schema = JSON.parse(process.argv[process.argv.indexOf("--json-schema") + 1]);
 const value = schema.properties.facts
@@ -515,6 +517,7 @@ process.stdin.on("end", () => console.log(JSON.stringify({ structured_output: va
     await writeFile(fakeCursor, `#!/usr/bin/env node
 const fs = require("node:fs");
 if (process.argv.includes("--version")) { console.log("cursor-test"); process.exit(0); }
+if (process.argv.includes("status")) process.exit(0);
 fs.appendFileSync(process.env.HARNESSME_TEST_ARGS, JSON.stringify(process.argv) + "\\n");
 const input = fs.readFileSync("input.txt", "utf8");
 const schema = JSON.parse(input.slice(input.indexOf("OUTPUT JSON SCHEMA\\n") + "OUTPUT JSON SCHEMA\\n".length));
